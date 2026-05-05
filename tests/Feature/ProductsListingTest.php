@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /**
@@ -36,6 +37,7 @@ function seedSnapshot(array $attributes = []): int
     if ($storeId === null) {
         $storeId = DB::table('stores')->insertGetId([
             'name' => $storeName,
+            'slug' => Str::slug($storeName),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -43,7 +45,7 @@ function seedSnapshot(array $attributes = []): int
 
     $rawOfferId = DB::table('raw_offers')->insertGetId([
         'store_id' => $storeId,
-        'external_id' => $rawExternalId,
+        'content_hash' => $rawExternalId,
         'name' => $productName,
         'price' => $price,
         'old_price' => $oldPrice,
@@ -102,10 +104,13 @@ function seedSnapshot(array $attributes = []): int
         ]);
     }
 
+    $weekStarting = Carbon::parse($scrapedAt)->startOfWeek()->toDateString();
+
     return (int) DB::table('offer_snapshots')->insertGetId([
         'raw_offer_id' => $rawOfferId,
         'product_variant_id' => $productVariantId,
         'store_id' => $storeId,
+        'week_starting' => $weekStarting,
         'price' => $price,
         'old_price' => $oldPrice,
         'discount_percent' => $discountPercent,
@@ -153,7 +158,7 @@ test('listing deduplicates older snapshots for the same product + store pair', f
         'product_name' => 'Šviežias pienas 1 L',
         'normalized_name' => 'šviežias pienas 1l',
         'price' => 2.00,
-        'scraped_at' => Carbon::now()->subDays(3),
+        'scraped_at' => Carbon::now()->subWeek(),
     ]);
 
     $latestId = seedSnapshot([

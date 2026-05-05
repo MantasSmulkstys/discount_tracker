@@ -34,77 +34,6 @@ class KainuCatalog
     public const FRESHNESS_WINDOW_DAYS = 14;
 
     /**
-     * Maps each frontend category slug to:
-     *
-     * - `category_ids`: top-level `categories.id` values from the AI
-     *   normalization pass (the official LT product taxonomy stored in the
-     *   `categories` table).
-     * - `subcategory_ids`: optional narrower `subcategories.id` values when
-     *   the slug should hit only part of an AI category (e.g. dairy is a
-     *   subcategory of "ŠVIEŽI MAISTO PRODUKTAI").
-     * - `keywords`: legacy heuristic fallback used only for products whose
-     *   `category_id` is still NULL (deterministic-only normalization,
-     *   currently ~6% of the catalog).
-     *
-     * @var array<string, array{
-     *     label: string,
-     *     category_ids: array<int, int>,
-     *     subcategory_ids: array<int, int>,
-     *     keywords: array<int, string>
-     * }>
-     */
-    public const CATEGORIES = [
-        'produce' => [
-            'label' => 'Vaisiai ir daržovės',
-            'category_ids' => [2],
-            'subcategory_ids' => [],
-            'keywords' => ['obuol', 'pomidor', 'agurk', 'morkų', 'morkos', 'bulv', 'salot', 'banan', 'citrin', 'apelsin', 'avokad', 'uogos', 'brašk', 'braški', 'kriaušė', 'vynuog', 'kopūst', 'svogūn', 'česnak', 'paprik', 'brokol', 'vaisiai', 'daržovės'],
-        ],
-        'dairy' => [
-            'label' => 'Pieno produktai',
-            'category_ids' => [],
-            'subcategory_ids' => [20, 22],
-            'keywords' => ['pien', 'jogurt', 'sūris', 'suris', 'sviestas', 'varškė', 'varske', 'grietin', 'kiaušin', 'kiausin', 'kefyr'],
-        ],
-        'meat' => [
-            'label' => 'Mėsa ir žuvis',
-            'category_ids' => [1],
-            'subcategory_ids' => [34],
-            'keywords' => ['mėsa', 'mesa', 'vištie', 'vistie', 'kiaulie', 'jautien', 'dešr', 'desr', 'kumpis', 'šoninė', 'sonine', 'šprotai', 'žuvis', 'zuvis', 'lašiš', 'lasis', 'silkė', 'silke', 'tunas'],
-        ],
-        'bakery' => [
-            'label' => 'Duona ir kepiniai',
-            'category_ids' => [7],
-            'subcategory_ids' => [15],
-            'keywords' => ['duona', 'bandel', 'pyrag', 'tortas', 'sausain', 'batonas', 'baguette', 'kepiniai', 'keksas', 'bulk'],
-        ],
-        'pantry' => [
-            'label' => 'Sausi produktai',
-            'category_ids' => [4, 5],
-            'subcategory_ids' => [21],
-            'keywords' => ['makaronai', 'kruopos', 'ryžiai', 'ryziai', 'miltai', 'cukrus', 'druska', 'aliejus', 'actas', 'padaž', 'padaz', 'konservai', 'kava', 'arbata', 'sriuba'],
-        ],
-        'frozen' => [
-            'label' => 'Šaldyti produktai',
-            'category_ids' => [],
-            'subcategory_ids' => [18],
-            'keywords' => ['šaldyt', 'saldyt', 'ledai', 'koldūn', 'koldun', 'picos', 'pica'],
-        ],
-        'drinks' => [
-            'label' => 'Gėrimai',
-            'category_ids' => [6],
-            'subcategory_ids' => [],
-            'keywords' => ['vanduo', 'sultys', 'alus', 'vynas', 'limonad', 'kola', 'fanta', 'sprite', 'gaivusis', 'gazuotas'],
-        ],
-        'household' => [
-            'label' => 'Namų ūkiui',
-            'category_ids' => [8, 9],
-            'subcategory_ids' => [],
-            'keywords' => ['skalbimo', 'plovimo', 'valymo', 'muilas', 'šampū', 'sampu', 'dantų', 'dantu', 'tualet', 'servetėl', 'servetel', 'higien'],
-        ],
-    ];
-
-    /**
      * Base query for the public listing. Starts from `offer_snapshots`, joins
      * `product_variants`, `normalized_products` and `stores`, and restricts to
      * the latest snapshot per (normalized product, store) pair.
@@ -129,6 +58,7 @@ class KainuCatalog
                 'offer_snapshots.price',
                 'offer_snapshots.old_price',
                 'offer_snapshots.discount_percent',
+                'offer_snapshots.condition',
                 'offer_snapshots.unit_price_value',
                 'offer_snapshots.unit_price_unit',
                 'offer_snapshots.valid_from',
@@ -199,79 +129,119 @@ class KainuCatalog
     }
 
     /**
-     * Apply a category filter to an offers query.
+     * Load the full category taxonomy from the DB, grouped by parent.
      *
-     * Primary path uses the structured `category_id` / `subcategory_id`
-     * fields populated by AI normalization. Products with NULL category_id
-     * (~6% of catalog when AI has run, more when run with `--no-ai`) fall
-     * back to the keyword heuristic on `canonical_name` so they're not lost
-     * from the listing entirely.
+     * Returns an ordered list shaped for direct consumption by the frontend:
+     * top-level categories with nested subcategories. Used by ProductsController
+     * to render the filter UI.
+     *
+     * @return array<int, array{id: int, slug: string, name: string, subcategories: array<int, array{id: int, slug: string, name: string}>}>
      */
-    public function applyCategory(Builder $query, ?string $categoryId): Builder
+    public function loadCategoryTree(): array
     {
-        if (! $categoryId || $categoryId === 'all' || ! isset(self::CATEGORIES[$categoryId])) {
-            return $query;
+        $rows = DB::table('categories')
+            ->leftJoin('subcategories', 'subcategories.category_id', '=', 'categories.id')
+            ->orderBy('categories.name_lt')
+            ->orderBy('subcategories.name_lt')
+            ->get([
+                'categories.id as category_id',
+                'categories.name_lt as category_name',
+                'categories.slug as category_slug',
+                'subcategories.id as subcategory_id',
+                'subcategories.name_lt as subcategory_name',
+                'subcategories.slug as subcategory_slug',
+            ]);
+
+        $tree = [];
+        foreach ($rows as $row) {
+            $cid = (int) $row->category_id;
+
+            if (! isset($tree[$cid])) {
+                $tree[$cid] = [
+                    'id' => $cid,
+                    'slug' => (string) $row->category_slug,
+                    'name' => $this->sentenceCase((string) $row->category_name),
+                    'subcategories' => [],
+                ];
+            }
+
+            if ($row->subcategory_id !== null) {
+                $tree[$cid]['subcategories'][] = [
+                    'id' => (int) $row->subcategory_id,
+                    'slug' => (string) $row->subcategory_slug,
+                    'name' => $this->sentenceCase((string) $row->subcategory_name),
+                ];
+            }
         }
 
-        $meta = self::CATEGORIES[$categoryId];
-        $categoryIds = $meta['category_ids'];
-        $subcategoryIds = $meta['subcategory_ids'];
-        $keywords = $meta['keywords'];
-
-        return $query->where(function (Builder $q) use ($categoryIds, $subcategoryIds, $keywords): void {
-            if (! empty($categoryIds)) {
-                $q->orWhereIn('normalized_products.category_id', $categoryIds);
-            }
-
-            if (! empty($subcategoryIds)) {
-                $q->orWhereIn('normalized_products.subcategory_id', $subcategoryIds);
-            }
-
-            if (! empty($keywords)) {
-                $q->orWhere(function (Builder $kq) use ($keywords): void {
-                    $kq->whereNull('normalized_products.category_id')
-                        ->where(function (Builder $kkq) use ($keywords): void {
-                            foreach ($keywords as $kw) {
-                                $needle = '%'.mb_strtolower($kw).'%';
-                                $kkq->orWhereRaw('LOWER(normalized_products.canonical_name) LIKE ?', [$needle])
-                                    ->orWhereRaw('LOWER(normalized_products.normalized_name) LIKE ?', [$needle]);
-                            }
-                        });
-                });
-            }
-        });
+        return array_values($tree);
     }
 
     /**
-     * Resolve the frontend category slug for a product, preferring the
-     * structured `categories.id` / `subcategories.id` values populated by AI
-     * normalization and falling back to keyword matching on the product name
-     * for rows that bypassed AI.
+     * First-letter capitalised, rest lowercase — "MĖSA IR DEŠRA" → "Mėsa ir dešra".
+     * Uses multibyte functions so Lithuanian letters (Š, Č, Ž …) are handled
+     * correctly regardless of the stored case.
+     */
+    private function sentenceCase(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        $lower = mb_strtolower($value);
+
+        return mb_strtoupper(mb_substr($lower, 0, 1))
+            .mb_substr($lower, 1);
+    }
+
+    /**
+     * Filter offers by category slug and (optional) subcategory slug.
+     *
+     * Slug-only — no keyword fallback. Products whose AI normalization didn't
+     * assign a category are simply absent from filtered views and only show
+     * in the unfiltered listing.
+     */
+    public function applyCategory(Builder $query, ?string $categorySlug, ?string $subcategorySlug = null): Builder
+    {
+        if (! $categorySlug || $categorySlug === 'all') {
+            return $query;
+        }
+
+        $categoryId = DB::table('categories')->where('slug', $categorySlug)->value('id');
+        if ($categoryId === null) {
+            return $query;
+        }
+
+        $query->where('normalized_products.category_id', (int) $categoryId);
+
+        if ($subcategorySlug && $subcategorySlug !== 'all') {
+            $subcategoryId = DB::table('subcategories')
+                ->where('category_id', $categoryId)
+                ->where('slug', $subcategorySlug)
+                ->value('id');
+
+            if ($subcategoryId !== null) {
+                $query->where('normalized_products.subcategory_id', (int) $subcategoryId);
+            }
+        }
+
+        return $query;
+    }
+
+    /**
+     * Resolve the category slug for a product so the frontend knows which
+     * filter pill to highlight when navigating to a related-products view.
+     *
+     * Reads the slug straight from the seeded taxonomy via category_id; falls
+     * back to 'all' when the product wasn't categorised.
      */
     public function resolveCategory(string $name, ?int $categoryId = null, ?int $subcategoryId = null): string
     {
         if ($categoryId !== null) {
-            foreach (self::CATEGORIES as $id => $meta) {
-                if (in_array($categoryId, $meta['category_ids'], true)) {
-                    return $id;
-                }
-            }
-        }
+            $slug = DB::table('categories')->where('id', $categoryId)->value('slug');
 
-        if ($subcategoryId !== null) {
-            foreach (self::CATEGORIES as $id => $meta) {
-                if (in_array($subcategoryId, $meta['subcategory_ids'], true)) {
-                    return $id;
-                }
-            }
-        }
-
-        $lower = mb_strtolower($name);
-        foreach (self::CATEGORIES as $id => $meta) {
-            foreach ($meta['keywords'] as $kw) {
-                if (mb_strpos($lower, mb_strtolower($kw)) !== false) {
-                    return $id;
-                }
+            if ($slug !== null) {
+                return (string) $slug;
             }
         }
 
@@ -314,6 +284,7 @@ class KainuCatalog
 
         return [
             'id' => (int) $row->id,
+            'normalizedProductId' => (int) $row->normalized_product_id,
             'name' => $productName,
             'normalizedName' => $normalizedName,
             'brand' => $brand,
@@ -323,6 +294,7 @@ class KainuCatalog
             'bestPrice' => $currentPrice,
             'oldPrice' => $row->old_price !== null ? (float) $row->old_price : null,
             'discount' => $discount !== null ? (float) $discount : null,
+            'condition' => $row->condition ?? null,
             'bestStore' => Str::slug($row->store_name ?? 'other'),
             'bestStoreName' => Str::title($row->store_name ?? 'Kita'),
             'image' => $row->image_url ?? null,
@@ -417,28 +389,6 @@ class KainuCatalog
         $formatted = number_format($value, 2, ',', '');
 
         return rtrim(rtrim($formatted, '0'), ',') ?: '0';
-    }
-
-    /**
-     * Build a simulated 8-week price history when none is available.
-     *
-     * @return array<int, float>
-     */
-    public function simulatedHistory(float $currentPrice, ?float $oldPrice, int $points = 8): array
-    {
-        $high = $oldPrice && $oldPrice > $currentPrice ? $oldPrice : $currentPrice * 1.22;
-        $history = [];
-
-        for ($i = 0; $i < $points; $i++) {
-            $t = $i / max($points - 1, 1);
-            $value = $high + ($currentPrice - $high) * $t;
-            $jitter = (sin(($i + 1) * 1.8) * 0.04) * $value;
-            $history[] = round($value + $jitter, 2);
-        }
-
-        $history[$points - 1] = round($currentPrice, 2);
-
-        return $history;
     }
 
     /**

@@ -3,6 +3,8 @@ import type { CategoryId } from '@/lib/kainu';
 export type KainuProduct = {
     /** `offer_snapshots.id` — the id used in `/products/{id}` URLs. */
     id: number;
+    /** `normalized_products.id` — used for reporting. */
+    normalizedProductId: number;
     /** `normalized_products.canonical_name` (the human-friendly display name). */
     name: string;
     /** `normalized_products.normalized_name` (lower-cased, dedupe key). */
@@ -15,6 +17,8 @@ export type KainuProduct = {
     oldPrice: number | null;
     /** Effective discount percent (from `discount_percent` or computed from prices). */
     discount?: number | null;
+    /** Promo condition text from the store ("1+1", "2+1", coupon notes…). */
+    condition?: string | null;
     bestStore: string;
     bestStoreName: string;
     image: string | null;

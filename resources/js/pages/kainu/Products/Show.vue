@@ -1,26 +1,28 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeft,
-    Bell,
     ChevronRight,
     Clock,
-    Heart,
+    LineChart,
     MapPin,
     Minus,
     Plus,
     ShoppingCart,
-    Sparkles,
     Tag,
+    TriangleAlert,
 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import {
+    destroy as reportDestroy,
+    store as reportStore,
+} from '@/actions/App/Http/Controllers/ProductReportController';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
 import PriceHistoryChart from '@/components/kainu/PriceHistoryChart.vue';
 import ProductCard from '@/components/kainu/ProductCard.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
-import { useKainuFavorites } from '@/composables/useKainuFavorites';
 import { discountPct, formatPrice } from '@/lib/kainu';
 import type { KainuProduct } from '@/types/kainu';
 
@@ -33,14 +35,6 @@ type StoreOffer = {
     url: string | null;
 };
 
-type Prediction = {
-    willDrop: boolean;
-    predictedPrice: number;
-    confidence: number;
-    window: string;
-    basedOn: string;
-};
-
 const props = defineProps<{
     product: KainuProduct;
     offers: StoreOffer[];
@@ -48,11 +42,37 @@ const props = defineProps<{
     history: number[];
     historyLabels: string[];
     historyIsReal: boolean;
-    prediction: Prediction;
+    reportedIds: number[];
 }>();
 
 const { addToCart, openDrawer } = useKainuCart();
-const { toggle, isFavorited } = useKainuFavorites();
+
+const page = usePage();
+const isLoggedIn = () => !!page.props.auth?.user;
+
+function handleToggleReport(product: KainuProduct) {
+    if (!isLoggedIn()) {
+        router.visit('/login');
+        return;
+    }
+    const isReported = props.reportedIds.includes(product.normalizedProductId);
+    if (isReported) {
+        router.delete(reportDestroy(product.normalizedProductId).url, {
+            preserveScroll: true,
+            preserveState: true,
+        });
+    } else {
+        router.post(
+            reportStore(product.normalizedProductId).url,
+            {},
+            { preserveScroll: true, preserveState: true },
+        );
+    }
+}
+
+const isProductReported = computed(() =>
+    props.reportedIds.includes(props.product.normalizedProductId),
+);
 
 const qty = ref(1);
 const selectedStore = ref<string>(props.product.bestStore);
@@ -138,25 +158,24 @@ function handleAltAdd(alt: KainuProduct) {
                 <button
                     type="button"
                     :aria-label="
-                        isFavorited(product.id)
-                            ? 'Pašalinti iš mėgstamų'
-                            : 'Pridėti į mėgstamus'
+                        isProductReported
+                            ? 'Atšaukti pranešimą'
+                            : 'Pranešti apie klaidą'
+                    "
+                    :title="
+                        isProductReported
+                            ? 'Atšaukti pranešimą'
+                            : 'Pranešti apie klaidą'
                     "
                     class="absolute top-4 right-4 flex h-10 w-10 items-center justify-center rounded-full border transition-colors"
                     :class="
-                        isFavorited(product.id)
-                            ? 'border-red-200 bg-red-50 text-red-600'
-                            : 'border-[#e7e5e0] bg-[#fafaf7] text-stone-700 hover:border-stone-300'
+                        isProductReported
+                            ? 'border-amber-300 bg-amber-50 text-amber-600'
+                            : 'border-[#e7e5e0] bg-[#fafaf7] text-stone-500 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-500'
                     "
-                    @click="toggle(product.id)"
+                    @click="handleToggleReport(product)"
                 >
-                    <Heart
-                        :size="18"
-                        :stroke-width="2"
-                        :fill="
-                            isFavorited(product.id) ? 'currentColor' : 'none'
-                        "
-                    />
+                    <TriangleAlert :size="16" :stroke-width="2" />
                 </button>
                 <ProductImage
                     :seed="product.id"
@@ -243,40 +262,6 @@ function handleAltAdd(alt: KainuProduct) {
                     </div>
                 </div>
 
-                <div
-                    class="mb-5 flex items-center gap-3 rounded-[12px] border border-[#e7e5e0] bg-[#fafaf7] px-4 py-3"
-                >
-                    <div
-                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#e7e5e0] bg-white text-[#15803d]"
-                    >
-                        <Sparkles :size="16" />
-                    </div>
-                    <div class="flex-1">
-                        <div
-                            class="mb-[2px] text-[13px] font-semibold text-stone-900"
-                        >
-                            <template v-if="prediction.willDrop">
-                                Prognozė: atpigs iki
-                                {{ formatPrice(prediction.predictedPrice) }}
-                            </template>
-                            <template v-else>
-                                Prognozė: kaina stabili
-                            </template>
-                        </div>
-                        <div class="text-[11px] text-stone-500">
-                            {{ prediction.basedOn }} · Patikimumas:
-                            {{ prediction.confidence }}%
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded-[8px] border border-[#e7e5e0] bg-white px-[10px] py-[6px] text-[12px] font-semibold text-stone-700 transition-colors hover:border-stone-300"
-                    >
-                        <Bell :size="12" />
-                        Įspėti
-                    </button>
-                </div>
-
                 <div class="flex items-stretch gap-[10px]">
                     <div
                         class="flex items-center overflow-hidden rounded-[10px] border border-[#e7e5e0] bg-white"
@@ -334,23 +319,42 @@ function handleAltAdd(alt: KainuProduct) {
                         >
                             Kainų istorija
                         </h2>
-                        <p class="mt-[2px] text-[12px] text-stone-500">
-                            <template v-if="historyIsReal">
-                                {{ history.length }} stebėjimai
-                                ({{ historyLabels[0] }} –
-                                {{ historyLabels[historyLabels.length - 1] }})
-                            </template>
-                            <template v-else>
-                                Modeliuojama – kol kas nepakanka realių
-                                stebėjimų
-                            </template>
+                        <p
+                            v-if="historyIsReal"
+                            class="mt-[2px] text-[12px] text-stone-500"
+                        >
+                            {{ history.length }} stebėjimai
+                            ({{ historyLabels[0] }} –
+                            {{ historyLabels[historyLabels.length - 1] }})
                         </p>
                     </div>
                 </div>
+
                 <PriceHistoryChart
+                    v-if="historyIsReal"
                     :values="history"
                     :labels="historyLabels"
                 />
+                <div
+                    v-else
+                    class="flex flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-[#e7e5e0] bg-[#fafaf7] py-10 text-center"
+                >
+                    <LineChart
+                        :size="22"
+                        :stroke-width="1.5"
+                        class="text-stone-400"
+                    />
+                    <p class="m-0 text-[13px] font-medium text-stone-700">
+                        Kainų istorijos kol kas nėra
+                    </p>
+                    <p
+                        class="m-0 max-w-[360px] text-[11px] leading-relaxed text-stone-500"
+                    >
+                        Istorija atsiras, kai šis produktas bus stebimas bent
+                        dvi savaites — vienos savaitės akcijos kainai
+                        palyginti dar nėra su kuo.
+                    </p>
+                </div>
             </div>
         </section>
 
@@ -444,10 +448,10 @@ function handleAltAdd(alt: KainuProduct) {
                     v-for="alt in alternatives"
                     :key="alt.id"
                     :product="alt"
-                    :favorited="isFavorited(alt.id)"
+                    :reported="reportedIds.includes(alt.normalizedProductId)"
                     compact
                     @add-to-cart="handleAltAdd"
-                    @toggle-favorite="toggle(alt.id)"
+                    @toggle-report="handleToggleReport"
                 />
             </div>
         </section>

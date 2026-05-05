@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\OfferSnapshot;
+use App\Models\ProductReport;
 use App\Services\KainuCatalog;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
@@ -35,6 +36,7 @@ class ProductsController extends Controller
         }
 
         $category = (string) $request->string('category')->lower();
+        $subcategory = (string) $request->string('subcategory')->lower();
         $search = trim((string) $request->string('q'));
         $selectedStores = collect(explode(',', (string) $request->string('stores')))
             ->map(fn (string $s): string => Str::lower(trim($s)))
@@ -45,7 +47,7 @@ class ProductsController extends Controller
         $sort = (string) $request->string('sort', 'discount');
 
         $query = $this->catalog->offersQuery();
-        $query = $this->catalog->applyCategory($query, $category);
+        $query = $this->catalog->applyCategory($query, $category, $subcategory);
 
         if ($search !== '') {
             $needle = '%'.mb_strtolower($search).'%';
@@ -82,6 +84,12 @@ class ProductsController extends Controller
             ->map(fn (object $row) => $this->catalog->hydrate($row))
             ->values();
 
+        $reportedIds = auth()->check()
+            ? ProductReport::where('user_id', auth()->id())
+                ->pluck('normalized_product_id')
+                ->all()
+            : [];
+
         return Inertia::render('kainu/Products/Index', [
             'products' => [
                 'data' => $products,
@@ -89,14 +97,17 @@ class ProductsController extends Controller
                 'links' => $this->paginatorLinks($paginator),
             ],
             'allStores' => $this->storesWithCounts(),
+            'categoryTree' => $this->catalog->loadCategoryTree(),
             'filters' => [
                 'category' => $category ?: 'all',
+                'subcategory' => $subcategory ?: 'all',
                 'q' => $search,
                 'stores' => $selectedStores->all(),
                 'discount' => $discountOnly,
                 'maxPrice' => $maxPrice > 0 ? $maxPrice : null,
                 'sort' => $sort,
             ],
+            'reportedIds' => $reportedIds,
         ]);
     }
 
@@ -126,6 +137,7 @@ class ProductsController extends Controller
                     'offer_snapshots.price',
                     'offer_snapshots.old_price',
                     'offer_snapshots.discount_percent',
+                    'offer_snapshots.condition',
                     'offer_snapshots.unit_price_value',
                     'offer_snapshots.unit_price_unit',
                     'offer_snapshots.valid_from',
@@ -194,77 +206,23 @@ class ProductsController extends Controller
             ->map(fn (object $r) => $this->catalog->hydrate($r))
             ->values();
 
-        $current = $product['bestPrice'] ?? 0.0;
         $real = $this->catalog->priceHistory((int) $row->normalized_product_id);
-        $isRealHistory = $real['isReal'];
-        $history = $isRealHistory
-            ? $real['values']
-            : $this->catalog->simulatedHistory($current, $product['oldPrice']);
-        $historyLabels = $isRealHistory ? $real['labels'] : [];
 
-        $prediction = $this->predictNextPrice($history, $current, $isRealHistory);
+        $reportedIds = auth()->check()
+            ? ProductReport::where('user_id', auth()->id())
+                ->pluck('normalized_product_id')
+                ->all()
+            : [];
 
         return Inertia::render('kainu/Products/Show', [
             'product' => $product,
             'offers' => $priceOffers,
             'alternatives' => $alternatives,
-            'history' => $history,
-            'historyLabels' => $historyLabels,
-            'historyIsReal' => $isRealHistory,
-            'prediction' => $prediction,
+            'history' => $real['values'],
+            'historyLabels' => $real['labels'],
+            'historyIsReal' => $real['isReal'],
+            'reportedIds' => $reportedIds,
         ]);
-    }
-
-    /**
-     * Build the prediction block from a price-history series.
-     *
-     * Real series: project the most recent slope (last 4 points if available,
-     * otherwise as many as we have) onto the next period and clamp at -10%.
-     * Simulated series: use the original heuristic to keep the demo coherent
-     * when no scrape history exists yet.
-     *
-     * @param  array<int, float>  $history
-     * @return array{
-     *     willDrop: bool,
-     *     predictedPrice: float,
-     *     confidence: int,
-     *     window: string,
-     *     basedOn: string,
-     * }
-     */
-    private function predictNextPrice(array $history, float $current, bool $isReal): array
-    {
-        if (! $isReal || count($history) < 2) {
-            $points = max(count($history), 1);
-            $tail = $history[count($history) - 1] ?? $current;
-            $head = $history[max(0, count($history) - 4)] ?? $tail;
-            $predicted = max($current * 0.9, round($current + ($tail - $head) / 1.5, 2));
-
-            return [
-                'willDrop' => $predicted < $current,
-                'predictedPrice' => round($predicted, 2),
-                'confidence' => 55,
-                'window' => 'per artimiausias 2 savaites',
-                'basedOn' => 'Modeliuota – nepakanka kainų istorijos',
-            ];
-        }
-
-        $points = count($history);
-        $window = min(4, $points);
-        $tail = $history[$points - 1];
-        $head = $history[$points - $window];
-        $slope = ($tail - $head) / max($window - 1, 1);
-        $predicted = max($current * 0.9, round($current + $slope, 2));
-
-        $confidence = (int) round(min(95, 50 + ($points * 8)));
-
-        return [
-            'willDrop' => $predicted < $current,
-            'predictedPrice' => round($predicted, 2),
-            'confidence' => $confidence,
-            'window' => 'per artimiausią savaitę',
-            'basedOn' => 'Remiantis '.$points.' savaičių stebėjimais',
-        ];
     }
 
     /**

@@ -4,23 +4,18 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOneThrough;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
- * A store-specific price observation for a product variant at a point in time.
+ * An immutable price observation for one (variant, store, week) tuple.
  *
- * The public product listing reads from this table (joined with
- * `product_variants`, `normalized_products`, and `stores`) rather than from
- * `raw_offers`, so the user sees one row per (normalized product, store) and
- * never sees duplicate scrape batches.
- *
- * Note: the user-facing shorthand is "`OfferSnapshot` belongs to
- * `NormalizedProduct`"; under the hood the link goes through `product_variants`.
- * The {@see normalizedProduct()} relation hides that hop.
+ * This is the price-history append-only table — one row per weekly scrape per
+ * store per variant. For "what's the price right now?" use {@see CurrentOffer}
+ * instead; for "did the price change?" use {@see PriceChange}.
  */
 class OfferSnapshot extends Model
 {
@@ -37,9 +32,10 @@ class OfferSnapshot extends Model
         'price' => 'decimal:2',
         'old_price' => 'decimal:2',
         'discount_percent' => 'decimal:2',
-        'unit_price_value' => 'decimal:4',
+        'unit_price_value' => 'decimal:3',
         'valid_from' => 'date',
         'valid_to' => 'date',
+        'week_starting' => 'date',
         'scraped_at' => 'datetime',
         'loyalty_card' => 'boolean',
         'is_promotion' => 'boolean',
@@ -71,10 +67,14 @@ class OfferSnapshot extends Model
     }
 
     /**
-     * Convenience "through" accessor — snapshot → variant → normalized product.
-     * Presented as belongsTo in the domain model even though schema uses an
-     * intermediary `product_variants` table.
-     *
+     * @return BelongsTo<ScrapeBatch, self>
+     */
+    public function scrapeBatch(): BelongsTo
+    {
+        return $this->belongsTo(ScrapeBatch::class, 'scrape_batch_id');
+    }
+
+    /**
      * @return HasOneThrough<NormalizedProduct, ProductVariant, self>
      */
     public function normalizedProduct(): HasOneThrough
@@ -90,34 +90,19 @@ class OfferSnapshot extends Model
     }
 
     /**
-     * Limit a query to only the latest snapshot per (normalized product, store)
-     * pair. This is what the public listing uses so the same product never
-     * shows up twice for the same store across scrape batches.
-     *
-     * @param  Builder<self>  $query
-     * @return Builder<self>
+     * Subquery returning the MAX(offer_snapshots.id) per
+     * (normalized_product_id, store_id). Kept for legacy controllers — new
+     * code should read directly from `current_offers` instead, which is
+     * O(rows-of-result) instead of O(history).
      */
-    public function scopeLatestPerProductStore(Builder $query): Builder
+    public static function latestIdsPerProductStoreSubquery(): Builder
     {
-        $table = $query->getModel()->getTable();
-
-        $query->whereIn("$table.id", self::latestIdsPerProductStoreSubquery());
-
-        return $query;
-    }
-
-    /**
-     * A portable (PostgreSQL + SQLite) **subquery builder** that selects the
-     * maximum `offer_snapshots.id` for every (normalized_product_id, store_id)
-     * pair. Because IDs are monotonically assigned, MAX(id) ≈ latest snapshot.
-     *
-     * Use with `whereIn('offer_snapshots.id', OfferSnapshot::latestIdsPerProductStoreSubquery())`.
-     */
-    public static function latestIdsPerProductStoreSubquery(): \Illuminate\Database\Query\Builder
-    {
+        // Priceless promos (discount-only / "1+1" cards) are valid offers and
+        // must appear in the listing, so we don't filter on `price IS NOT NULL`.
+        // The presence of a row already implies the snapshot is meaningful —
+        // see `_insert_offer_snapshot` in the Python normalizer.
         return DB::table('offer_snapshots as os_latest')
             ->join('product_variants as pv_latest', 'pv_latest.id', '=', 'os_latest.product_variant_id')
-            ->whereNotNull('os_latest.price')
             ->groupBy('pv_latest.normalized_product_id', 'os_latest.store_id')
             ->selectRaw('MAX(os_latest.id)');
     }

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Heart, Plus } from 'lucide-vue-next';
+import { Plus, TriangleAlert } from 'lucide-vue-next';
 import { computed } from 'vue';
+import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
@@ -11,22 +12,52 @@ import type { KainuProduct } from '@/types/kainu';
 type Props = {
     product: KainuProduct;
     compact?: boolean;
-    favorited?: boolean;
+    reported?: boolean;
 };
 
 const props = withDefaults(defineProps<Props>(), {
     compact: false,
-    favorited: false,
+    reported: false,
 });
 
 const emit = defineEmits<{
     (e: 'add-to-cart', product: KainuProduct): void;
-    (e: 'toggle-favorite', product: KainuProduct): void;
+    (e: 'toggle-report', product: KainuProduct): void;
 }>();
 
-const pct = computed(() =>
-    discountPct(props.product.oldPrice, props.product.bestPrice),
+/**
+ * Effective discount in whole percent. Clamped to [0, 99] — anything outside
+ * that range is data corruption (negative discounts from "3+1"-style cards
+ * where price/old_price aren't real apples-to-apples values, or >=100% from
+ * old_price=0 edge cases) and gets dropped to 0 so we don't render nonsense.
+ */
+const pct = computed(() => {
+    const raw = (() => {
+        const explicit = props.product.discount;
+        if (typeof explicit === 'number' && explicit > 0) {
+            return Math.round(explicit);
+        }
+        return discountPct(props.product.oldPrice, props.product.bestPrice);
+    })();
+    return raw > 0 && raw < 100 ? raw : 0;
+});
+
+const condition = computed(() => props.product.condition?.trim() ?? '');
+
+/**
+ * The discount badge is only shown when there's no price to display. When a
+ * price IS shown, the strikethrough old price already conveys the discount
+ * — adding a badge on top is visual noise. The condition badge always wins
+ * over the discount badge because conditions like "3+1" make percentage
+ * math misleading even when the numbers parse cleanly.
+ */
+const showDiscountBadge = computed(
+    () =>
+        pct.value > 0 &&
+        props.product.bestPrice === null &&
+        condition.value === '',
 );
+const showConditionBadge = computed(() => condition.value !== '');
 
 const imageSize = computed(() => (props.compact ? 90 : 110));
 const padding = computed(() => (props.compact ? 'p-3' : 'p-[14px]'));
@@ -37,10 +68,10 @@ const handleAdd = (event: MouseEvent) => {
     emit('add-to-cart', props.product);
 };
 
-const handleFavorite = (event: MouseEvent) => {
+const handleReport = (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    emit('toggle-favorite', props.product);
+    emit('toggle-report', props.product);
 };
 </script>
 
@@ -50,28 +81,31 @@ const handleFavorite = (event: MouseEvent) => {
         class="group relative flex flex-col rounded-[12px] border border-[#e7e5e0] bg-white transition-[border-color,box-shadow,transform] duration-150 hover:border-[#15803d] hover:shadow-[0_2px_8px_rgba(21,128,61,0.08)]"
         :class="padding"
     >
-        <div v-if="pct > 0" class="absolute top-[10px] left-[10px] z-[1]">
-            <DiscountBadge :pct="pct" size="md" />
+        <div
+            v-if="showDiscountBadge || showConditionBadge"
+            class="absolute top-[10px] left-[10px] z-[1] flex flex-col items-start gap-[6px]"
+        >
+            <DiscountBadge v-if="showDiscountBadge" :pct="pct" size="md" />
+            <ConditionBadge
+                v-if="showConditionBadge"
+                :condition="condition"
+                size="md"
+            />
         </div>
 
         <button
             type="button"
-            :aria-label="
-                favorited ? 'Pašalinti iš mėgstamų' : 'Pridėti į mėgstamus'
-            "
+            :aria-label="reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'"
+            :title="reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'"
             class="absolute top-2 right-2 z-[1] flex h-7 w-7 items-center justify-center rounded-full border transition-colors"
             :class="
-                favorited
-                    ? 'border-red-200 bg-red-50 text-red-600'
-                    : 'border-[#e7e5e0] bg-white/90 text-stone-500 hover:border-stone-300'
+                reported
+                    ? 'border-amber-300 bg-amber-50 text-amber-600'
+                    : 'border-[#e7e5e0] bg-white/90 text-stone-400 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-500'
             "
-            @click="handleFavorite"
+            @click="handleReport"
         >
-            <Heart
-                :size="14"
-                :stroke-width="2"
-                :fill="favorited ? 'currentColor' : 'none'"
-            />
+            <TriangleAlert :size="13" :stroke-width="2" />
         </button>
 
         <div class="mt-1 mb-[10px] flex justify-center">
@@ -104,8 +138,9 @@ const handleFavorite = (event: MouseEvent) => {
             </div>
         </div>
 
-        <div class="mb-2 flex items-baseline gap-[6px]">
+        <div class="mb-2 flex min-h-[18px] items-baseline gap-[6px]">
             <span
+                v-if="product.bestPrice !== null"
                 class="text-[18px] leading-none font-bold tracking-tight text-[#15803d]"
             >
                 {{ formatPrice(product.bestPrice) }}

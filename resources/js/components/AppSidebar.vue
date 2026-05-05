@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
-import { LayoutGrid } from 'lucide-vue-next';
+import { Link, usePage } from '@inertiajs/vue3';
+import { Flag, LayoutGrid } from 'lucide-vue-next';
+import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -15,7 +16,11 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
+import { reports as adminReports } from '@/routes/admin';
 import type { NavItem } from '@/types';
+
+const page = usePage();
+const isAdmin = computed(() => page.props.auth?.user?.role === 'admin');
 
 const mainNavItems: NavItem[] = [
     {
@@ -24,6 +29,12 @@ const mainNavItems: NavItem[] = [
         icon: LayoutGrid,
     },
 ];
+
+const adminNavItems = computed<NavItem[]>(() =>
+    isAdmin.value
+        ? [{ title: 'Reports', href: adminReports(), icon: Flag }]
+        : [],
+);
 
 const footerNavItems: NavItem[] = [];
 </script>
@@ -44,7 +55,7 @@ const footerNavItems: NavItem[] = [];
 
         <SidebarContent>
             <NavMain :items="mainNavItems" />
-        </SidebarContent>
+            <NavMain v-if="isAdmin" :items="adminNavItems" /></SidebarContent>
 
         <SidebarFooter>
             <NavFooter :items="footerNavItems" />

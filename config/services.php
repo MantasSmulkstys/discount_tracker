@@ -44,6 +44,9 @@ return [
     'google_maps' => [
         'key' => env('GOOGLE_MAPS_API_KEY'),
         'map_id' => env('GOOGLE_MAPS_MAP_ID'),
+        // Server-side key for the Routes API. Use a separate, IP/server-restricted key
+        // in production; falls back to `key` when unset (fine for local dev).
+        'server_key' => env('GOOGLE_MAPS_SERVER_KEY'),
     ],
 
 ];

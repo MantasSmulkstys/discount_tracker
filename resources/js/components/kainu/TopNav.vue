@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3';
 import {
-    BarChart3,
-    Bell,
     ChefHat,
-    Heart,
-    Home,
+    LineChart,
     LogOut,
-    Search,
+    RefreshCw,
     Settings,
     ShoppingCart,
     UserRound,
 } from 'lucide-vue-next';
-import { computed, ref, watch } from 'vue';
+import { computed } from 'vue';
+import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -22,9 +20,12 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useKainuCart } from '@/composables/useKainuCart';
-import { useKainuFavorites } from '@/composables/useKainuFavorites';
-import { dashboard, login, logout, register } from '@/routes';
+import { home, login, logout } from '@/routes';
+import { reports as adminReports } from '@/routes/admin';
+import { index as adminScrape } from '@/routes/admin/scrape';
+import { index as cartIndex } from '@/routes/cart';
 import { edit as editProfile } from '@/routes/profile';
+import { index as statsIndex } from '@/routes/stats';
 
 type AuthUser = {
     id: number;
@@ -38,8 +39,7 @@ const page = usePage<{
     auth?: { user?: AuthUser | null };
 }>();
 
-const { totalCount, openDrawer } = useKainuCart();
-const { favorites } = useKainuFavorites();
+const { totalCount } = useKainuCart();
 
 const user = computed(() => page.props.auth?.user ?? null);
 const isAdmin = computed(() => user.value?.role === 'admin');
@@ -58,37 +58,6 @@ const isActive = (prefix: string): boolean => {
 
     return currentPath.value.startsWith(prefix);
 };
-
-const searchQuery = ref<string>(
-    typeof window !== 'undefined'
-        ? (new URLSearchParams(window.location.search).get('q') ?? '')
-        : '',
-);
-
-let debounceHandle: ReturnType<typeof setTimeout> | null = null;
-
-watch(searchQuery, (q) => {
-    if (debounceHandle) {
-        clearTimeout(debounceHandle);
-    }
-
-    debounceHandle = setTimeout(() => {
-        const params = new URLSearchParams(window.location.search);
-
-        if (q) {
-            params.set('q', q);
-        } else {
-            params.delete('q');
-        }
-
-        params.delete('page');
-        router.get(
-            `/products${params.toString() ? `?${params.toString()}` : ''}`,
-            {},
-            { preserveState: true, preserveScroll: true, replace: true },
-        );
-    }, 300);
-});
 
 const userInitials = computed(() => {
     if (!user.value) {
@@ -120,11 +89,11 @@ const handleLogout = () => {
         class="sticky top-0 z-50 border-b border-kainu-border bg-white/88 backdrop-blur-lg"
     >
         <div class="mx-auto flex h-16 max-w-[1280px] items-center gap-6 px-6">
-            <Link href="/" class="flex items-center gap-[10px]">
+            <Link :href="home().url" class="flex items-center gap-[10px]">
                 <div
                     class="flex h-8 w-8 items-center justify-center rounded-[9px] bg-[#15803d] text-[15px] font-extrabold tracking-tighter text-white"
                 >
-                    KS
+                    <AppLogoIcon class="size-5 invert" />
                 </div>
                 <div class="text-left">
                     <div
@@ -132,58 +101,28 @@ const handleLogout = () => {
                     >
                         Kainų seklys
                     </div>
-                    <div
-                        class="mt-[2px] text-[10px] font-medium text-stone-500"
-                    >
-                        nuolaidos · 6 parduotuvės
-                    </div>
                 </div>
             </Link>
 
-            <div class="relative hidden max-w-[480px] flex-1 md:block">
-                <Search
-                    :size="17"
-                    class="pointer-events-none absolute top-1/2 left-[14px] -translate-y-1/2 text-stone-400"
-                />
-                <input
-                    v-model="searchQuery"
-                    type="text"
-                    placeholder="Ieškoti prekių, pvz. „pienas“ arba „bananai“…"
-                    class="h-10 w-full rounded-[10px] border border-kainu-border bg-kainu-surface pr-4 pl-10 text-[14px] text-stone-900 transition-all outline-none focus:border-[#15803d] focus:bg-white focus:shadow-[0_0_0_3px_rgba(21,128,61,0.12)]"
-                />
-            </div>
-
             <nav class="hidden items-center gap-1 lg:flex">
                 <Link
-                    href="/"
+                    :href="statsIndex().url"
                     class="inline-flex items-center gap-2 rounded-[10px] px-[14px] py-[9px] text-[14px] transition-colors"
                     :class="
-                        isActive('/') && currentPath === '/'
+                        isActive('/statistika')
                             ? 'bg-brand-50 font-semibold text-[#15803d]'
                             : 'font-medium text-stone-700 hover:bg-stone-50'
                     "
                 >
-                    <Home :size="17" :stroke-width="1.75" />
-                    Pradžia
-                </Link>
-                <Link
-                    href="/products"
-                    class="inline-flex items-center gap-2 rounded-[10px] px-[14px] py-[9px] text-[14px] transition-colors"
-                    :class="
-                        isActive('/products')
-                            ? 'bg-brand-50 font-semibold text-[#15803d]'
-                            : 'font-medium text-stone-700 hover:bg-stone-50'
-                    "
-                >
-                    <BarChart3 :size="17" :stroke-width="1.75" />
-                    Pasiūlymai
+                    <LineChart :size="16" :stroke-width="1.75" />
+                    Statistika
                 </Link>
                 <Link
                     v-if="isAdmin"
-                    :href="dashboard().url"
+                    :href="adminReports().url"
                     class="inline-flex items-center gap-2 rounded-[10px] px-[14px] py-[9px] text-[14px] transition-colors"
                     :class="
-                        isActive('/dashboard')
+                        isActive('/admin/reports')
                             ? 'bg-brand-50 font-semibold text-[#15803d]'
                             : 'font-medium text-stone-700 hover:bg-stone-50'
                     "
@@ -191,48 +130,36 @@ const handleLogout = () => {
                     <ChefHat :size="17" :stroke-width="1.75" />
                     Valdymas
                 </Link>
+                <Link
+                    v-if="isAdmin"
+                    :href="adminScrape().url"
+                    class="inline-flex items-center gap-2 rounded-[10px] px-[14px] py-[9px] text-[14px] transition-colors"
+                    :class="
+                        isActive('/admin/scrape')
+                            ? 'bg-brand-50 font-semibold text-[#15803d]'
+                            : 'font-medium text-stone-700 hover:bg-stone-50'
+                    "
+                >
+                    <RefreshCw :size="16" :stroke-width="1.75" />
+                    Skenavimas
+                </Link>
             </nav>
 
             <div class="ml-auto flex items-center gap-1">
-                <button
-                    type="button"
-                    aria-label="Pranešimai"
-                    class="relative flex h-10 w-10 items-center justify-center rounded-[10px] text-stone-700 transition-colors hover:bg-stone-100"
-                >
-                    <Bell :size="18" :stroke-width="1.75" />
-                    <span
-                        class="absolute top-[6px] right-[6px] h-[7px] w-[7px] rounded-full border-2 border-white bg-red-600"
-                    />
-                </button>
-
-                <button
-                    type="button"
-                    aria-label="Mėgstami"
-                    class="relative flex h-10 w-10 items-center justify-center rounded-[10px] text-stone-700 transition-colors hover:bg-stone-100"
-                >
-                    <Heart :size="18" :stroke-width="1.75" />
-                    <span
-                        v-if="favorites.size > 0"
-                        class="absolute top-1 right-1 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[#15803d] px-[5px] py-px text-[10px] font-bold text-white"
-                    >
-                        {{ favorites.size }}
-                    </span>
-                </button>
-
-                <button
-                    type="button"
+                <Link
+                    :href="cartIndex().url"
                     aria-label="Krepšelis"
-                    class="relative flex h-10 w-10 items-center justify-center rounded-[10px] text-stone-700 transition-colors hover:bg-stone-100"
-                    @click="openDrawer"
+                    class="relative inline-flex h-10 items-center gap-2 rounded-[10px] px-3 text-stone-700 transition-colors hover:bg-stone-100"
                 >
                     <ShoppingCart :size="18" :stroke-width="1.75" />
+                    <span class="text-[14px] font-medium">Krepšelis</span>
                     <span
                         v-if="totalCount > 0"
-                        class="absolute top-1 right-1 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[#15803d] px-[5px] py-px text-[10px] font-bold text-white"
+                        class="inline-flex min-w-[18px] items-center justify-center rounded-full bg-[#15803d] px-[6px] py-px text-[11px] font-bold text-white"
                     >
                         {{ totalCount }}
                     </span>
-                </button>
+                </Link>
 
                 <div class="mx-1 h-6 w-px bg-kainu-border" />
 
@@ -288,11 +215,20 @@ const handleLogout = () => {
                         </DropdownMenuItem>
                         <DropdownMenuItem v-if="isAdmin" as-child>
                             <Link
-                                :href="dashboard().url"
+                                :href="adminReports().url"
                                 class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
                             >
                                 <Settings :size="15" :stroke-width="1.75" />
                                 Valdymas
+                            </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem v-if="isAdmin" as-child>
+                            <Link
+                                :href="adminScrape().url"
+                                class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
+                            >
+                                <RefreshCw :size="15" :stroke-width="1.75" />
+                                Skenavimas
                             </Link>
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -310,15 +246,9 @@ const handleLogout = () => {
                 <div v-else class="flex items-center gap-2">
                     <Link
                         :href="login().url"
-                        class="hidden items-center rounded-[10px] px-3 py-2 text-[13px] font-medium text-stone-700 transition-colors hover:bg-stone-100 sm:inline-flex"
+                        class="inline-flex items-center rounded-[10px] px-3 py-2 text-[13px] font-medium text-stone-700 transition-colors hover:bg-stone-100"
                     >
                         Prisijungti
-                    </Link>
-                    <Link
-                        :href="register().url"
-                        class="inline-flex items-center justify-center rounded-[10px] bg-stone-900 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-[#15803d]"
-                    >
-                        Registruotis
                     </Link>
                 </div>
             </div>

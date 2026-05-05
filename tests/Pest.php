@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /*
@@ -14,13 +15,10 @@ use Tests\TestCase;
 */
 
 pest()->extend(TestCase::class)
-    ->beforeEach(function (): void {
-        $this->markTestSkipped('Feature tests are temporarily disabled because they may refresh database state.');
-    })
+    ->use(RefreshDatabase::class)
     ->in('Feature');
 
-pest()->extend(TestCase::class)
-    ->in('Unit');
+pest()->extend(TestCase::class)->in('Unit');
 
 /*
 |--------------------------------------------------------------------------

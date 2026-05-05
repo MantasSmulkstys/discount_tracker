@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Services\Maps\PlacesApiClient;
+use App\Services\Maps\RoutesApiClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -17,7 +19,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(RoutesApiClient::class, fn (): RoutesApiClient => new RoutesApiClient(
+            apiKey: config('services.google_maps.server_key') ?: config('services.google_maps.key'),
+        ));
+
+        $this->app->singleton(PlacesApiClient::class, fn (): PlacesApiClient => new PlacesApiClient(
+            apiKey: config('services.google_maps.server_key') ?: config('services.google_maps.key'),
+        ));
     }
 
     /**

@@ -39,7 +39,9 @@ class GoogleAuthenticatedSessionController extends Controller
             Auth::login($user, true);
             request()->session()->regenerate();
 
-            return redirect()->intended(route('home'));
+            $home = $user->isAdmin() ? route('admin.reports') : route('home');
+
+            return redirect()->intended($home);
         } catch (AuthenticationException $exception) {
             return to_route('login')->with('oauthError', $exception->getMessage());
         } catch (Throwable $exception) {

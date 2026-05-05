@@ -13,21 +13,20 @@ import {
     Trash2,
     X,
 } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
+import RoutePlanner from '@/components/kainu/RoutePlanner.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import StoreMap from '@/components/kainu/StoreMap.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
 import { discountPct, formatPrice, resolveStore } from '@/lib/kainu';
-import type {
-    GoogleMapsConfig,
-    KainuStoreLocation,
-} from '@/types/kainu';
+import type { GoogleMapsConfig } from '@/types/kainu';
 
 const props = defineProps<{
-    storeLocations: KainuStoreLocation[];
     googleMaps: GoogleMapsConfig;
 }>();
+
+type LatLng = { lat: number; lng: number };
 
 const {
     items,
@@ -73,9 +72,48 @@ const savingsPct = computed(() => {
 
 const highlightChains = computed<string[]>(() => storesUsed.value);
 
-const storeLocationsProp = computed<KainuStoreLocation[]>(
-    () => props.storeLocations ?? [],
-);
+type RoutePlanStop = {
+    chain: string;
+    name: string;
+    address: string;
+    city: string;
+    lat: number;
+    lng: number;
+};
+
+type RoutePlanResult = {
+    polyline: string;
+    stops: RoutePlanStop[];
+};
+
+const routePlan = ref<RoutePlanResult | null>(null);
+const routeOrigin = ref<LatLng | null>(null);
+const routePolyline = computed<string | null>(() => routePlan.value?.polyline ?? null);
+const routeStops = computed<RoutePlanStop[]>(() => routePlan.value?.stops ?? []);
+const hasMapsKey = computed<boolean>(() => Boolean(props.googleMaps?.apiKey));
+const planningVisible = ref(false);
+const planningSectionRef = ref<HTMLElement | null>(null);
+
+const onRoutePlan = (plan: RoutePlanResult | null): void => {
+    routePlan.value = plan;
+};
+
+const onRouteOrigin = (next: LatLng | null): void => {
+    routeOrigin.value = next;
+};
+
+const generateShoppingPlan = async (): Promise<void> => {
+    if (items.value.length === 0) {
+        return;
+    }
+
+    planningVisible.value = true;
+    await nextTick();
+    planningSectionRef.value?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+    });
+};
 </script>
 
 <template>
@@ -141,8 +179,8 @@ const storeLocationsProp = computed<KainuStoreLocation[]>(
             </div>
         </header>
 
-        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-            <div class="flex flex-col gap-4">
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+            <div class="flex flex-col gap-6">
                 <div
                     v-if="items.length === 0"
                     class="flex flex-col items-center gap-4 rounded-[18px] border border-dashed border-kainu-border bg-white px-8 py-16 text-center"
@@ -324,9 +362,54 @@ const storeLocationsProp = computed<KainuStoreLocation[]>(
                         </ul>
                     </div>
                 </template>
+
+                <section
+                    v-if="planningVisible"
+                    ref="planningSectionRef"
+                    class="flex flex-col gap-4 scroll-mt-20 rounded-[16px] border border-kainu-border bg-white p-5"
+                >
+                    <header class="flex items-start justify-between gap-3">
+                        <div>
+                            <h2
+                                class="text-[16px] font-semibold tracking-tight text-stone-900"
+                            >
+                                Pirkinių sąrašas ir maršrutas
+                            </h2>
+                            <p class="mt-0.5 text-[12px] text-stone-500">
+                                Aplankykite parduotuves žemiau pateiktame
+                                eiliškume — tai trumpiausias kelias visoms
+                                krepšelio prekėms surinkti.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            aria-label="Slėpti pirkinių sąrašą"
+                            class="-mr-1 inline-flex h-8 w-8 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
+                            @click="planningVisible = false"
+                        >
+                            <X :size="16" :stroke-width="2" />
+                        </button>
+                    </header>
+
+                    <div class="flex flex-col gap-4">
+                        <RoutePlanner
+                            :chains="highlightChains"
+                            :has-maps-key="hasMapsKey"
+                            :api-key="googleMaps.apiKey ?? null"
+                            @plan="onRoutePlan"
+                            @origin="onRouteOrigin"
+                        />
+                        <StoreMap
+                            :config="googleMaps"
+                            :origin="routeOrigin"
+                            :stops="routeStops"
+                            :route-polyline="routePolyline"
+                        />
+                    </div>
+                </section>
             </div>
 
-            <aside class="flex flex-col gap-4">
+            <aside class="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
                 <div
                     class="flex flex-col gap-3 rounded-[16px] border border-kainu-border bg-white p-5 shadow-[0_8px_32px_-20px_rgba(15,23,42,0.2)]"
                 >
@@ -373,8 +456,9 @@ const storeLocationsProp = computed<KainuStoreLocation[]>(
                         type="button"
                         :disabled="items.length === 0"
                         class="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-brand-700 text-[14px] font-semibold text-white transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        @click="generateShoppingPlan"
                     >
-                        Generuoti pirkinių sąrašą
+                        {{ planningVisible ? 'Atnaujinti pirkinių sąrašą' : 'Generuoti pirkinių sąrašą' }}
                     </button>
                     <button
                         type="button"
@@ -384,12 +468,6 @@ const storeLocationsProp = computed<KainuStoreLocation[]>(
                         Išsaugoti kaip savaitės sąrašą
                     </button>
                 </div>
-
-                <StoreMap
-                    :config="googleMaps"
-                    :locations="storeLocationsProp"
-                    :highlight-chains="highlightChains"
-                />
 
                 <section
                     class="flex flex-col gap-4 rounded-[16px] border border-kainu-border bg-white p-5"

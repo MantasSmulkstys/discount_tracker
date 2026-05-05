@@ -11,11 +11,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * A single row scraped from a store's promo feed.
  *
- * This table is the scraper's source-of-truth: it may contain duplicates across
- * scrape batches and should only be consumed by the scraper, the normalizer,
- * and the admin dashboard. The **public product listing** consumes
- * {@see OfferSnapshot} instead — always prefer `OfferSnapshot` for user-facing
- * queries.
+ * This is a landing/audit table — it captures what the scraper saw, untouched.
+ * Public reads should never go through here; they go through `current_offers`
+ * (latest price per store/variant) or `offer_snapshots` (price history).
  */
 class RawOffer extends Model
 {
@@ -29,13 +27,13 @@ class RawOffer extends Model
     protected $casts = [
         'price' => 'decimal:2',
         'old_price' => 'decimal:2',
-        'discount' => 'decimal:2',
         'loyalty_card' => 'boolean',
         'scraped_at' => 'datetime',
         'valid_from' => 'date',
         'valid_to' => 'date',
         'unit_price_value' => 'decimal:4',
         'normalized_at' => 'datetime',
+        'raw_payload' => 'array',
     ];
 
     /**
@@ -44,6 +42,14 @@ class RawOffer extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
+    }
+
+    /**
+     * @return BelongsTo<ScrapeBatch, self>
+     */
+    public function scrapeBatch(): BelongsTo
+    {
+        return $this->belongsTo(ScrapeBatch::class);
     }
 
     /**

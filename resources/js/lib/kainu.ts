@@ -69,216 +69,23 @@ export function resolveStore(value: string | null | undefined): StoreMeta {
     };
 }
 
-export type CategoryId =
-    | 'all'
-    | 'produce'
-    | 'dairy'
-    | 'meat'
-    | 'bakery'
-    | 'pantry'
-    | 'frozen'
-    | 'drinks'
-    | 'household';
+/**
+ * Category identifiers come from `categories.slug` in the DB now. The frontend
+ * never invents categories — it's always rendering whatever taxonomy
+ * `KainuCatalog::loadCategoryTree()` ships down.
+ */
+export type CategoryId = string;
 
-export type CategoryMeta = {
-    id: CategoryId;
-    label: string;
-    icon: string;
-    keywords: string[];
+export type CategoryNode = {
+    id: number;
+    slug: string;
+    name: string;
 };
 
-/**
- * Client-side categories with keyword heuristic for matching raw offer names.
- * Keywords are checked against the lowercased product name.
- */
-export const CATEGORIES: CategoryMeta[] = [
-    { id: 'all', label: 'Visos kategorijos', icon: 'LayoutGrid', keywords: [] },
-    {
-        id: 'produce',
-        label: 'Vaisiai ir daržovės',
-        icon: 'Leaf',
-        keywords: [
-            'obuol',
-            'pomidor',
-            'agurk',
-            'morkų',
-            'morkos',
-            'bulv',
-            'salot',
-            'bananai',
-            'citrin',
-            'apelsin',
-            'avokad',
-            'uogos',
-            'braškės',
-            'braški',
-            'kriaušė',
-            'vynuog',
-            'kopūst',
-            'svogūn',
-            'česnak',
-            'paprik',
-            'brokol',
-            'ispanin',
-            'vaisiai',
-            'daržovės',
-        ],
-    },
-    {
-        id: 'dairy',
-        label: 'Pieno produktai',
-        icon: 'Milk',
-        keywords: [
-            'pien',
-            'jogurt',
-            'sūris',
-            'suris',
-            'sviestas',
-            'varškė',
-            'varske',
-            'grietin',
-            'kiaušin',
-            'kiausin',
-            'kefyr',
-            'kefyras',
-        ],
-    },
-    {
-        id: 'meat',
-        label: 'Mėsa ir žuvis',
-        icon: 'Beef',
-        keywords: [
-            'mėsa',
-            'mesa',
-            'vištie',
-            'vistie',
-            'kiaulie',
-            'jautien',
-            'dešr',
-            'desr',
-            'kumpis',
-            'šoninė',
-            'sonine',
-            'šprotai',
-            'žuvis',
-            'zuvis',
-            'lašiš',
-            'lasis',
-            'silkė',
-            'silke',
-            'tuna',
-            'tunas',
-        ],
-    },
-    {
-        id: 'bakery',
-        label: 'Duona ir kepiniai',
-        icon: 'Croissant',
-        keywords: [
-            'duona',
-            'bandel',
-            'pyrag',
-            'tortas',
-            'sausain',
-            'batonas',
-            'baguette',
-            'kepiniai',
-            'keksas',
-            'bulk',
-        ],
-    },
-    {
-        id: 'pantry',
-        label: 'Sausi produktai',
-        icon: 'Package',
-        keywords: [
-            'makaronai',
-            'kruopos',
-            'ryžiai',
-            'ryziai',
-            'miltai',
-            'cukrus',
-            'druska',
-            'aliejus',
-            'actas',
-            'padaž',
-            'padaz',
-            'konservai',
-            'kava',
-            'arbata',
-            'sriuba',
-        ],
-    },
-    {
-        id: 'frozen',
-        label: 'Šaldyti produktai',
-        icon: 'Snowflake',
-        keywords: [
-            'šaldyt',
-            'saldyt',
-            'ledai',
-            'šaldyti',
-            'saldytos',
-            'koldūn',
-            'koldun',
-            'picos',
-            'pica',
-        ],
-    },
-    {
-        id: 'drinks',
-        label: 'Gėrimai',
-        icon: 'GlassWater',
-        keywords: [
-            'vanduo',
-            'sultys',
-            'alus',
-            'vynas',
-            'limonad',
-            'kola',
-            'fanta',
-            'sprite',
-            'gaivusis',
-            'gazuotas',
-            'kokteilis',
-        ],
-    },
-    {
-        id: 'household',
-        label: 'Namų ūkiui',
-        icon: 'Sparkles',
-        keywords: [
-            'skalbimo',
-            'plovimo',
-            'valymo',
-            'muilas',
-            'šampū',
-            'sampu',
-            'dantų',
-            'dantu',
-            'tualet',
-            'servetėl',
-            'servetel',
-            'higien',
-        ],
-    },
-];
+export type CategoryTreeNode = CategoryNode & {
+    subcategories: CategoryNode[];
+};
 
-export function matchCategory(name: string): CategoryId {
-    const lower = name.toLowerCase();
-
-    for (const c of CATEGORIES) {
-        if (c.id === 'all') {
-            continue;
-        }
-
-        if (c.keywords.some((kw) => lower.includes(kw))) {
-            return c.id;
-        }
-    }
-
-    return 'all';
-}
 
 /** Deterministic emoji for a given product name/id — placeholder until photos land. */
 export function emojiForProduct(nameOrId: string): string {

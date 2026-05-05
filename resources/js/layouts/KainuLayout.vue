@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import CartDrawer from '@/components/kainu/CartDrawer.vue';
+import ScraperNoticeBanner from '@/components/kainu/ScraperNoticeBanner.vue';
 import TopNav from '@/components/kainu/TopNav.vue';
 </script>
 
 <template>
     <div class="min-h-screen bg-[#fafaf7] text-stone-900">
+        <ScraperNoticeBanner />
         <TopNav />
 
         <main class="mx-auto max-w-[1280px] px-6 pb-16">

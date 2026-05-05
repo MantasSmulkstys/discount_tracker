@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
 import { Home } from 'lucide-vue-next';
+import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import { home } from '@/routes';
 
 defineProps<{
@@ -19,7 +20,7 @@ defineProps<{
                     <span
                         class="flex h-9 w-9 items-center justify-center rounded-[9px] bg-[#15803d] text-[15px] font-extrabold tracking-tighter text-white"
                     >
-                        KS
+                        <AppLogoIcon class="size-5 invert" />
                     </span>
                     <span class="text-left">
                         <span

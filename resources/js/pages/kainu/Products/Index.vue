@@ -1,27 +1,21 @@
-<script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
+﻿<script setup lang="ts">
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { store as reportStore, destroy as reportDestroy } from '@/actions/App/Http/Controllers/ProductReportController';
 import {
-    Beef,
     Check,
     ChevronLeft,
     ChevronRight,
-    Croissant,
-    GlassWater,
     LayoutGrid,
-    Leaf,
-    Milk,
-    Package,
-    Snowflake,
-    Sparkles,
+    Search,
     X,
 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import type { Component } from 'vue';
+import CategoryPills from '@/components/kainu/CategoryPills.vue';
 import ProductCard from '@/components/kainu/ProductCard.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
-import { useKainuFavorites } from '@/composables/useKainuFavorites';
-import { CATEGORIES, resolveStore } from '@/lib/kainu';
+import { resolveStore } from '@/lib/kainu';
+import type { CategoryTreeNode } from '@/lib/kainu';
 import type {
     KainuPageLink,
     KainuPagination,
@@ -31,6 +25,7 @@ import type {
 
 type Filters = {
     category: string;
+    subcategory: string;
     q: string;
     stores: string[];
     discount: boolean;
@@ -45,32 +40,41 @@ const props = defineProps<{
         links: KainuPageLink[];
     };
     allStores: KainuStoreCount[];
+    categoryTree: CategoryTreeNode[];
     filters: Filters;
+    reportedIds: number[];
 }>();
 
-const iconMap: Record<string, Component> = {
-    LayoutGrid,
-    Leaf,
-    Milk,
-    Beef,
-    Croissant,
-    Package,
-    Snowflake,
-    GlassWater,
-    Sparkles,
-};
-
 const { addToCart, openDrawer } = useKainuCart();
-const { toggle, isFavorited } = useKainuFavorites();
+
+const activeCategoryNode = computed(() =>
+    props.categoryTree.find((n) => n.slug === props.filters.category) ?? null,
+);
+
+const activeSubcategoryNode = computed(() => {
+    if (!activeCategoryNode.value || props.filters.subcategory === 'all') {
+        return null;
+    }
+    return (
+        activeCategoryNode.value.subcategories.find(
+            (s) => s.slug === props.filters.subcategory,
+        ) ?? null
+    );
+});
 
 const categoryLabel = computed(() => {
-    const match = CATEGORIES.find((c) => c.id === props.filters.category);
-
-    return match ? match.label : 'Visi pasiūlymai';
+    if (activeSubcategoryNode.value) {
+        return activeSubcategoryNode.value.name;
+    }
+    if (activeCategoryNode.value) {
+        return activeCategoryNode.value.name;
+    }
+    return 'Visi pasiūlymai';
 });
 
 const priceMax = ref<number>(props.filters.maxPrice ?? 20);
 const discountOnly = ref<boolean>(props.filters.discount);
+const searchInput = ref<string>(props.filters.q ?? '');
 
 watch(
     () => props.filters.maxPrice,
@@ -86,6 +90,35 @@ watch(
     },
 );
 
+watch(
+    () => props.filters.q,
+    (next) => {
+        searchInput.value = next ?? '';
+    },
+);
+
+let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+function onSearchInput() {
+    if (searchDebounce) {
+        clearTimeout(searchDebounce);
+    }
+    searchDebounce = setTimeout(() => {
+        if (searchInput.value !== (props.filters.q ?? '')) {
+            updateFilters({ q: searchInput.value.trim() });
+        }
+    }, 300);
+}
+
+function clearSearch() {
+    if (searchDebounce) {
+        clearTimeout(searchDebounce);
+    }
+    searchInput.value = '';
+    if (props.filters.q) {
+        updateFilters({ q: '' });
+    }
+}
+
 function updateFilters(
     patch: Partial<Filters>,
     extra: Record<string, string | number> = {},
@@ -98,6 +131,10 @@ function updateFilters(
 
     if (current.category && current.category !== 'all') {
         query.category = current.category;
+
+        if (current.subcategory && current.subcategory !== 'all') {
+            query.subcategory = current.subcategory;
+        }
     }
 
     if (current.q) {
@@ -134,8 +171,14 @@ function toggleStore(storeId: string) {
     updateFilters({ stores: next });
 }
 
-function setCategory(categoryId: string) {
-    updateFilters({ category: categoryId });
+function setCategory(categorySlug: string) {
+    // Switching category clears any subcategory selection — different
+    // categories don't share subcategories.
+    updateFilters({ category: categorySlug, subcategory: 'all' });
+}
+
+function setSubcategory(subcategorySlug: string) {
+    updateFilters({ subcategory: subcategorySlug });
 }
 
 function setSort(event: Event) {
@@ -171,6 +214,28 @@ function handleAdd(product: KainuProduct) {
     openDrawer();
 }
 
+const page = usePage();
+const isLoggedIn = () => !!page.props.auth?.user;
+
+function handleToggleReport(product: KainuProduct) {
+    if (!isLoggedIn()) {
+        router.visit('/login');
+        return;
+    }
+    const isReported = props.reportedIds.includes(product.normalizedProductId);
+    if (isReported) {
+        router.delete(reportDestroy(product.normalizedProductId).url, {
+            preserveScroll: true,
+            preserveState: true,
+        });
+    } else {
+        router.post(reportStore(product.normalizedProductId).url, {}, {
+            preserveScroll: true,
+            preserveState: true,
+        });
+    }
+}
+
 function storeMeta(storeId: string) {
     return resolveStore(storeId);
 }
@@ -184,15 +249,24 @@ function storeMeta(storeId: string) {
             class="mb-1 flex items-baseline gap-[10px] text-[13px] text-stone-500"
         >
             <Link href="/" class="hover:text-stone-700">Pradžia</Link>
-            <ChevronRight :size="12" />
-            <Link href="/products" class="hover:text-stone-700">
-                Pasiūlymai
-            </Link>
-            <template v-if="filters.category !== 'all'">
+            <template v-if="activeCategoryNode">
                 <ChevronRight :size="12" />
-                <span class="font-medium text-stone-900">{{
-                    categoryLabel
-                }}</span>
+                <Link
+                    :href="`/products?category=${activeCategoryNode.slug}`"
+                    class="hover:text-stone-700"
+                    :class="{
+                        'font-medium text-stone-900':
+                            !activeSubcategoryNode,
+                    }"
+                >
+                    {{ activeCategoryNode.name }}
+                </Link>
+            </template>
+            <template v-if="activeSubcategoryNode">
+                <ChevronRight :size="12" />
+                <span class="font-medium text-stone-900">
+                    {{ activeSubcategoryNode.name }}
+                </span>
             </template>
         </div>
         <h1
@@ -204,9 +278,34 @@ function storeMeta(storeId: string) {
             </span>
         </h1>
 
+        <div
+            class="mb-5 flex items-center gap-2 rounded-[12px] border border-[#e7e5e0] bg-white px-3 py-2 focus-within:border-stone-300"
+        >
+            <Search :size="16" :stroke-width="1.75" class="text-stone-400" />
+            <input
+                v-model="searchInput"
+                type="search"
+                inputmode="search"
+                autocomplete="off"
+                placeholder="Ieškoti prekės, prekės ženklo arba aprašymo…"
+                class="flex-1 bg-transparent text-[14px] text-stone-900 placeholder:text-stone-400 focus:outline-none"
+                @input="onSearchInput"
+                @keydown.enter.prevent="onSearchInput"
+            />
+            <button
+                v-if="searchInput"
+                type="button"
+                aria-label="Išvalyti paiešką"
+                class="flex h-6 w-6 items-center justify-center rounded-full text-stone-500 hover:bg-stone-100"
+                @click="clearSearch"
+            >
+                <X :size="14" :stroke-width="2" />
+            </button>
+        </div>
+
         <div class="grid gap-7 lg:grid-cols-[240px_1fr]">
             <aside class="hidden lg:block">
-                <div class="sticky top-[76px] space-y-6">
+                <div class="space-y-6">
                     <div>
                         <h3
                             class="mb-[10px] text-[12px] font-bold tracking-[0.06em] text-stone-500 uppercase"
@@ -215,24 +314,69 @@ function storeMeta(storeId: string) {
                         </h3>
                         <div class="flex flex-col gap-[1px]">
                             <button
-                                v-for="c in CATEGORIES"
-                                :key="c.id"
                                 type="button"
                                 class="flex items-center gap-[10px] rounded-[8px] px-2 py-[7px] text-left text-[13px] transition-colors"
                                 :class="
-                                    c.id === filters.category
+                                    filters.category === 'all'
                                         ? 'bg-brand-50 font-semibold text-[#15803d]'
                                         : 'text-stone-700 hover:bg-stone-100'
                                 "
-                                @click="setCategory(c.id)"
+                                @click="setCategory('all')"
                             >
-                                <component
-                                    :is="iconMap[c.icon] ?? LayoutGrid"
-                                    :size="16"
-                                    :stroke-width="1.75"
-                                />
-                                <span class="flex-1">{{ c.label }}</span>
+                                <LayoutGrid :size="16" :stroke-width="1.75" />
+                                <span class="flex-1">Visos kategorijos</span>
                             </button>
+
+                            <template v-for="c in categoryTree" :key="c.slug">
+                                <button
+                                    type="button"
+                                    class="flex items-center gap-[10px] rounded-[8px] px-2 py-[7px] text-left text-[13px] transition-colors"
+                                    :class="
+                                        c.slug === filters.category
+                                            ? 'bg-brand-50 font-semibold text-[#15803d]'
+                                            : 'text-stone-700 hover:bg-stone-100'
+                                    "
+                                    @click="setCategory(c.slug)"
+                                >
+                                    <span class="flex-1">{{ c.name }}</span>
+                                </button>
+
+                                <!-- Subcategories indent under the active category. -->
+                                <div
+                                    v-if="
+                                        c.slug === filters.category &&
+                                        c.subcategories.length > 0
+                                    "
+                                    class="ml-3 flex flex-col gap-[1px] border-l-2 border-[#e7e5e0] pl-3"
+                                >
+                                    <button
+                                        type="button"
+                                        class="rounded-[6px] px-2 py-[5px] text-left text-[12px] transition-colors"
+                                        :class="
+                                            filters.subcategory === 'all'
+                                                ? 'font-semibold text-[#15803d]'
+                                                : 'text-stone-600 hover:bg-stone-100'
+                                        "
+                                        @click="setSubcategory('all')"
+                                    >
+                                        Visos
+                                    </button>
+                                    <button
+                                        v-for="s in c.subcategories"
+                                        :key="s.slug"
+                                        type="button"
+                                        class="rounded-[6px] px-2 py-[5px] text-left text-[12px] transition-colors"
+                                        :class="
+                                            s.slug === filters.subcategory
+                                                ? 'font-semibold text-[#15803d]'
+                                                : 'text-stone-600 hover:bg-stone-100'
+                                        "
+                                        @click="setSubcategory(s.slug)"
+                                    >
+                                        {{ s.name }}
+                                    </button>
+                                </div>
+                            </template>
                         </div>
                     </div>
 
@@ -426,9 +570,9 @@ function storeMeta(storeId: string) {
                         v-for="p in products.data"
                         :key="p.id"
                         :product="p"
-                        :favorited="isFavorited(p.id)"
+                        :reported="reportedIds.includes(p.normalizedProductId)"
                         @add-to-cart="handleAdd"
-                        @toggle-favorite="toggle(p.id)"
+                        @toggle-report="handleToggleReport"
                     />
                 </div>
 
@@ -449,7 +593,6 @@ function storeMeta(storeId: string) {
                                     ? 'border-[#15803d] bg-[#15803d] text-white'
                                     : 'border-[#e7e5e0] bg-white text-stone-700 hover:bg-stone-50'
                             "
-                            preserve-scroll
                         >
                             <ChevronLeft
                                 v-if="link.label === 'Previous'"
