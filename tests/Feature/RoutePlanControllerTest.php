@@ -183,6 +183,37 @@ test('returns 422 when validation fails', function (): void {
     ])->assertStatus(422);
 });
 
+test('falls back to original stop order when Routes API returns an invalid waypoint index', function (): void {
+    fakePlacesAndRoutes(
+        placeByChain: [
+            ['name' => 'Maxima A', 'address' => 'A 1', 'city' => 'Vilnius', 'lat' => 54.69, 'lng' => 25.28],
+            ['name' => 'Lidl B', 'address' => 'B 2', 'city' => 'Vilnius', 'lat' => 54.71, 'lng' => 25.30],
+        ],
+        routePayload: [
+            'routes' => [[
+                'optimizedIntermediateWaypointIndex' => [-1, 0],
+                'duration' => '600s',
+                'distanceMeters' => 8000,
+                'polyline' => ['encodedPolyline' => 'fallback'],
+                'legs' => [
+                    ['duration' => '200s', 'distanceMeters' => 3000],
+                    ['duration' => '200s', 'distanceMeters' => 3000],
+                    ['duration' => '200s', 'distanceMeters' => 2000],
+                ],
+            ]],
+        ],
+    );
+
+    $this->postJson('/cart/route-plan', [
+        'origin' => ['lat' => 54.69, 'lng' => 25.28],
+        'chains' => ['maxima', 'lidl'],
+        'mode' => 'driving',
+    ])->assertOk()
+        ->assertJsonPath('polyline', 'fallback')
+        ->assertJsonPath('stops.0.chain', 'maxima')
+        ->assertJsonPath('stops.1.chain', 'lidl');
+});
+
 test('returns 502 when Google Routes API errors after a successful Places lookup', function (): void {
     fakePlacesAndRoutes(
         placeByChain: [

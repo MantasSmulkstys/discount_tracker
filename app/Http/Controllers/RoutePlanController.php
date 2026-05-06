@@ -163,7 +163,10 @@ class RoutePlanController extends Controller
             mode: $travelMode,
         );
 
-        $orderedStops = $route['order'] !== []
+        $orderIsValid = $route['order'] !== []
+            && array_all($route['order'], fn (int $idx): bool => isset($stops[$idx]));
+
+        $orderedStops = $orderIsValid
             ? array_map(fn (int $idx): array => $stops[$idx], $route['order'])
             : $stops;
 
