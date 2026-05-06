@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeft,
-    BarChart3,
     Download,
     Minus,
     Plus,
@@ -19,7 +18,8 @@ import RoutePlanner from '@/components/kainu/RoutePlanner.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import StoreMap from '@/components/kainu/StoreMap.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
-import { discountPct, formatPrice, resolveStore } from '@/lib/kainu';
+import { discountPct, formatPrice } from '@/lib/kainu';
+import shoppingLists from '@/routes/shopping-lists';
 import type { GoogleMapsConfig } from '@/types/kainu';
 
 const props = defineProps<{
@@ -102,9 +102,34 @@ const onRouteOrigin = (next: LatLng | null): void => {
     routeOrigin.value = next;
 };
 
+const page = usePage();
+const isLoggedIn = (): boolean => Boolean(page.props.auth?.user);
+
 const generateShoppingPlan = async (): Promise<void> => {
     if (items.value.length === 0) {
         return;
+    }
+
+    if (isLoggedIn()) {
+        const payload = {
+            items: items.value.map((i) => ({
+                normalizedProductId: i.product.normalizedProductId,
+                name: i.product.name,
+                brand: i.product.brand,
+                storeId: i.storeId,
+                qty: i.qty,
+                unitPrice: i.product.bestPrice,
+                unitOldPrice: i.product.oldPrice,
+            })),
+            subtotal: subtotal.value,
+            originalTotal: originalTotal.value,
+            savings: savings.value,
+        };
+
+        router.post(shoppingLists.store.url(), payload, {
+            preserveScroll: true,
+            preserveState: true,
+        });
     }
 
     planningVisible.value = true;
@@ -236,7 +261,7 @@ const generateShoppingPlan = async (): Promise<void> => {
                             <li
                                 v-for="i in group.items"
                                 :key="`${i.id}-${i.storeId}`"
-                                class="flex items-center gap-4 border-b border-kainu-border px-5 py-4 last:border-0"
+                                class="flex flex-wrap items-center gap-3 border-b border-kainu-border px-4 py-4 last:border-0 sm:flex-nowrap sm:gap-4 sm:px-5"
                             >
                                 <ProductImage
                                     :seed="i.id"
@@ -244,6 +269,7 @@ const generateShoppingPlan = async (): Promise<void> => {
                                     :name="i.product.name"
                                     :emoji="i.product.emoji"
                                     :size="64"
+                                    class="shrink-0"
                                 />
                                 <div class="min-w-0 flex-1">
                                     <div class="mb-1 flex items-start gap-2">
@@ -315,49 +341,53 @@ const generateShoppingPlan = async (): Promise<void> => {
                                 </div>
 
                                 <div
-                                    class="flex items-center overflow-hidden rounded-[10px] border border-kainu-border"
+                                    class="flex w-full items-center justify-between gap-3 sm:contents"
                                 >
-                                    <button
-                                        type="button"
-                                        aria-label="Mažinti"
-                                        class="flex h-8 w-8 items-center justify-center text-stone-700 transition-colors hover:bg-kainu-surface"
-                                        @click="decrement(i.id, i.storeId)"
-                                    >
-                                        <Minus :size="14" />
-                                    </button>
                                     <div
-                                        class="min-w-[28px] text-center text-[13px] font-semibold"
+                                        class="flex items-center overflow-hidden rounded-[10px] border border-kainu-border"
                                     >
-                                        {{ i.qty }}
+                                        <button
+                                            type="button"
+                                            aria-label="Mažinti"
+                                            class="flex h-8 w-8 items-center justify-center text-stone-700 transition-colors hover:bg-kainu-surface"
+                                            @click="decrement(i.id, i.storeId)"
+                                        >
+                                            <Minus :size="14" />
+                                        </button>
+                                        <div
+                                            class="min-w-[28px] text-center text-[13px] font-semibold"
+                                        >
+                                            {{ i.qty }}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            aria-label="Daugiau"
+                                            class="flex h-8 w-8 items-center justify-center text-stone-700 transition-colors hover:bg-kainu-surface"
+                                            @click="increment(i.id, i.storeId)"
+                                        >
+                                            <Plus :size="14" />
+                                        </button>
                                     </div>
+
+                                    <div
+                                        class="min-w-[80px] text-right text-[15px] font-bold text-stone-900 tabular-nums"
+                                    >
+                                        {{
+                                            formatPrice(
+                                                (i.product.bestPrice ?? 0) * i.qty,
+                                            )
+                                        }}
+                                    </div>
+
                                     <button
                                         type="button"
-                                        aria-label="Daugiau"
-                                        class="flex h-8 w-8 items-center justify-center text-stone-700 transition-colors hover:bg-kainu-surface"
-                                        @click="increment(i.id, i.storeId)"
+                                        aria-label="Pašalinti"
+                                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                                        @click="remove(i.id, i.storeId)"
                                     >
-                                        <Plus :size="14" />
+                                        <X :size="16" />
                                     </button>
                                 </div>
-
-                                <div
-                                    class="min-w-[80px] text-right text-[15px] font-bold text-stone-900 tabular-nums"
-                                >
-                                    {{
-                                        formatPrice(
-                                            (i.product.bestPrice ?? 0) * i.qty,
-                                        )
-                                    }}
-                                </div>
-
-                                <button
-                                    type="button"
-                                    aria-label="Pašalinti"
-                                    class="flex h-8 w-8 items-center justify-center rounded-[8px] text-stone-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                                    @click="remove(i.id, i.storeId)"
-                                >
-                                    <X :size="16" />
-                                </button>
                             </li>
                         </ul>
                     </div>
@@ -460,83 +490,7 @@ const generateShoppingPlan = async (): Promise<void> => {
                     >
                         {{ planningVisible ? 'Atnaujinti pirkinių sąrašą' : 'Generuoti pirkinių sąrašą' }}
                     </button>
-                    <button
-                        type="button"
-                        :disabled="items.length === 0"
-                        class="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-kainu-border bg-white text-[13px] font-medium text-stone-700 transition-colors hover:bg-kainu-surface disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                        Išsaugoti kaip savaitės sąrašą
-                    </button>
                 </div>
-
-                <section
-                    class="flex flex-col gap-4 rounded-[16px] border border-kainu-border bg-white p-5"
-                >
-                    <header class="flex items-start gap-2">
-                        <BarChart3
-                            :size="16"
-                            :stroke-width="2"
-                            class="mt-0.5 text-brand-700"
-                        />
-                        <div>
-                            <h3
-                                class="text-[15px] font-semibold tracking-tight text-stone-900"
-                            >
-                                Kainų palyginimas
-                            </h3>
-                            <p class="mt-0.5 text-[12px] text-stone-500">
-                                Statistikos sekcija — čia atsiras krepšelio
-                                kainos palyginimas tarp parduotuvių ir kiti
-                                įžvalgos.
-                            </p>
-                        </div>
-                    </header>
-
-                    <div
-                        class="flex flex-col gap-2 rounded-[12px] bg-kainu-surface px-4 py-4 text-[12px] text-stone-500"
-                    >
-                        <div
-                            class="flex items-center justify-between font-medium text-stone-700"
-                        >
-                            <span>Pigiausia bendroji kaina</span>
-                            <span class="tabular-nums">
-                                {{ formatPrice(subtotal) }}
-                            </span>
-                        </div>
-                        <div
-                            v-for="storeId in storesUsed"
-                            :key="storeId"
-                            class="flex items-center justify-between"
-                        >
-                            <span class="flex items-center gap-1.5">
-                                <span
-                                    class="inline-block h-2 w-2 rounded-full"
-                                    :style="{
-                                        backgroundColor:
-                                            resolveStore(storeId).color,
-                                    }"
-                                />
-                                {{ resolveStore(storeId).name }}
-                            </span>
-                            <span class="tabular-nums text-stone-400">
-                                laukiama
-                            </span>
-                        </div>
-                        <div
-                            v-if="storesUsed.length === 0"
-                            class="text-center text-stone-400"
-                        >
-                            Pridėkite prekių, kad pamatytumėte palyginimą.
-                        </div>
-                    </div>
-
-                    <p
-                        class="rounded-[10px] border border-dashed border-kainu-border bg-kainu-surface px-4 py-3 text-[11px] leading-5 text-stone-400"
-                    >
-                        Būsimos funkcijos: kainų istorijos grafikas, optimaliausias
-                        parduotuvių derinys, prognozės dėl nuolaidų.
-                    </p>
-                </section>
             </aside>
         </div>
     </div>

@@ -60,11 +60,8 @@ const currentList = computed(() =>
             <div class="flex items-center justify-between">
                 <div>
                     <h1 class="text-2xl font-semibold text-slate-950">
-                        Flagged Products
+                        Pranešti produktai
                     </h1>
-                    <p class="mt-1 text-sm text-slate-500">
-                        User-reported (5+ reports) and AI low-confidence items.
-                    </p>
                 </div>
             </div>
 
@@ -82,7 +79,7 @@ const currentList = computed(() =>
                     @click="activeTab = 'user'"
                 >
                     <Flag :size="15" />
-                    User Reported
+                    Naudotojų pranešti produktai
                     <span
                         class="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700"
                     >
@@ -100,7 +97,7 @@ const currentList = computed(() =>
                     @click="activeTab = 'ai'"
                 >
                     <Bot :size="15" />
-                    AI Flagged
+                    DI pranešti produktai
                     <span
                         class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
                     >
@@ -113,7 +110,7 @@ const currentList = computed(() =>
                 v-if="currentList.length === 0"
                 class="rounded-3xl border border-dashed border-emerald-200 bg-white p-12 text-center text-slate-500"
             >
-                No items in this queue.
+                Nėra produktų eilėje.
             </div>
 
             <div
@@ -167,7 +164,7 @@ const currentList = computed(() =>
                             @click="openEdit(product)"
                         >
                             <Pencil :size="13" />
-                            Edit
+                            Redaguoti
                         </Button>
                     </li>
                 </ul>

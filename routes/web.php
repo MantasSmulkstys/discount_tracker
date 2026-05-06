@@ -8,6 +8,7 @@ use App\Http\Controllers\CartController;
 use App\Http\Controllers\ProductReportController;
 use App\Http\Controllers\ProductsController;
 use App\Http\Controllers\RoutePlanController;
+use App\Http\Controllers\ShoppingListController;
 use App\Http\Controllers\StatsController;
 use Illuminate\Support\Facades\Route;
 
@@ -27,6 +28,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('products.report');
     Route::delete('/products/{normalizedProduct}/report', [ProductReportController::class, 'destroy'])
         ->name('products.unreport');
+
+    Route::post('/shopping-lists', [ShoppingListController::class, 'store'])
+        ->name('shopping-lists.store');
 });
 
 Route::middleware('guest')->prefix('auth/google')->name('auth.google.')->group(function () {

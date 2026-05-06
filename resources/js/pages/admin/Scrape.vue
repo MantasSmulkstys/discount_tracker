@@ -142,11 +142,7 @@ function pickConfig() {
     <div class="p-4 md:p-6">
         <div class="mx-auto max-w-4xl space-y-8">
             <div>
-                <h1 class="text-2xl font-semibold text-slate-950">Skenavimo valdiklis</h1>
-                <p class="mt-1 text-sm text-slate-500">
-                    Rankinis paleidimas administratoriui. Cron grafikas veikia automatiškai
-                    pagal kiekvienos parduotuvės nustatymus.
-                </p>
+                <h1 class="text-2xl font-semibold text-slate-950">Duomenų tvarkymas</h1>
             </div>
 
             <section
@@ -162,14 +158,6 @@ function pickConfig() {
                         <h2 class="text-base font-semibold text-slate-900">
                             Importuoti parduotuvę
                         </h2>
-                        <p class="mt-1 text-xs text-slate-600">
-                            Įkelkite uscraper formato
-                            <code class="rounded bg-white px-1 py-0.5 font-mono text-[11px] text-emerald-700">
-                                config.json
-                            </code>
-                            failą. Sukursime parduotuvės įrašą ir aktyvuosime
-                            kortelę žemiau – tada galėsite paleisti skenavimą.
-                        </p>
                         <p
                             v-if="importForm.errors.config"
                             class="mt-2 text-xs font-medium text-red-600"
@@ -214,10 +202,7 @@ function pickConfig() {
                 >
                     <Bot :size="18" />
                     <div class="text-left">
-                        <div class="text-sm font-semibold">Tik AI normalizacija</div>
-                        <div class="text-xs text-slate-500">
-                            Apdoroja laukiančius raw_offers.
-                        </div>
+                        <div class="text-sm font-semibold">Normalizacija su DI</div>
                     </div>
                 </Button>
 
@@ -230,9 +215,6 @@ function pickConfig() {
                     <Workflow :size="18" />
                     <div class="text-left">
                         <div class="text-sm font-semibold">Pilnas procesas</div>
-                        <div class="text-xs text-slate-500">
-                            Visos parduotuvės + normalizacija.
-                        </div>
                     </div>
                 </Button>
             </div>
@@ -242,9 +224,6 @@ function pickConfig() {
                     <h2 class="text-base font-semibold text-slate-900">
                         Skenuoti vieną parduotuvę
                     </h2>
-                    <span class="text-xs text-slate-500">
-                        Skenavimas + AI normalizacija
-                    </span>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">

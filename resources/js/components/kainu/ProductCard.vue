@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { Plus, TriangleAlert } from 'lucide-vue-next';
+import { ArrowDownRight, ArrowUpRight, Plus, TriangleAlert } from 'lucide-vue-next';
 import { computed } from 'vue';
 import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
@@ -60,6 +60,30 @@ const showDiscountBadge = computed(() => {
     return !conditionIsAmbiguous.value;
 });
 const showConditionBadge = computed(() => condition.value !== '');
+
+const priceChange = computed(() => {
+    const change = props.product.priceChange;
+
+    if (typeof change !== 'number' || Math.abs(change) < 0.01) {
+        return null;
+    }
+
+    return {
+        amount: change,
+        isDrop: change < 0,
+    };
+});
+
+const priceChangeLabel = computed(() => {
+    if (priceChange.value === null) {
+        return '';
+    }
+
+    const abs = Math.abs(priceChange.value.amount);
+    const formatted = abs.toFixed(2).replace('.', ',');
+
+    return `${priceChange.value.isDrop ? '−' : '+'}${formatted} €`;
+});
 
 const imageSize = computed(() => (props.compact ? 90 : 110));
 const padding = computed(() => (props.compact ? 'p-3' : 'p-[14px]'));
@@ -158,6 +182,28 @@ const handleReport = (event: MouseEvent) => {
                 class="text-[12px] text-stone-400 line-through"
             >
                 {{ formatPrice(product.oldPrice) }}
+            </span>
+            <span
+                v-if="priceChange"
+                class="ml-auto inline-flex items-center gap-0.5 rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold leading-none"
+                :class="
+                    priceChange.isDrop
+                        ? 'bg-[#15803d]/10 text-[#15803d]'
+                        : 'bg-red-50 text-red-600'
+                "
+                :title="
+                    priceChange.isDrop
+                        ? 'Atpigo nuo praėjusios savaitės'
+                        : 'Pabrango nuo praėjusios savaitės'
+                "
+            >
+                <ArrowDownRight
+                    v-if="priceChange.isDrop"
+                    :size="10"
+                    :stroke-width="2.5"
+                />
+                <ArrowUpRight v-else :size="10" :stroke-width="2.5" />
+                {{ priceChangeLabel }}
             </span>
         </div>
 

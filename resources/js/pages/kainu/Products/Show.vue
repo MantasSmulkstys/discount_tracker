@@ -51,6 +51,7 @@ const props = defineProps<{
     alternatives: KainuProduct[];
     history: number[];
     historyLabels: string[];
+    historyDates: string[];
     historyIsReal: boolean;
     reportedIds: number[];
     adminEdit: AdminProduct | null;
@@ -359,6 +360,7 @@ function handleAltAdd(alt: KainuProduct) {
                     v-if="historyIsReal"
                     :values="history"
                     :labels="historyLabels"
+                    :dates="historyDates"
                 />
                 <div
                     v-else

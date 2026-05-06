@@ -229,6 +229,7 @@ class ProductsController extends Controller
             'alternatives' => $alternatives,
             'history' => $real['values'],
             'historyLabels' => $real['labels'],
+            'historyDates' => $real['dates'],
             'historyIsReal' => $real['isReal'],
             'reportedIds' => $reportedIds,
             'adminEdit' => $adminEdit,

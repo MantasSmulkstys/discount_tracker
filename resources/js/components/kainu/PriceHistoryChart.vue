@@ -5,12 +5,14 @@ import { formatPrice } from '@/lib/kainu';
 type Props = {
     values: number[];
     labels?: string[];
+    dates?: string[];
     width?: number;
     height?: number;
 };
 
 const props = withDefaults(defineProps<Props>(), {
     labels: () => [],
+    dates: () => [],
     width: 900,
     height: 220,
 });
@@ -56,6 +58,21 @@ const chart = computed(() => {
     const first = props.values[0];
     const change = first !== 0 ? ((latest - first) / first) * 100 : 0;
 
+    const weeksSpan = (() => {
+        if (props.dates.length >= 2) {
+            const start = new Date(props.dates[0]).getTime();
+            const end = new Date(props.dates[props.dates.length - 1]).getTime();
+
+            if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+                const days = (end - start) / (1000 * 60 * 60 * 24);
+
+                return Math.max(1, Math.round(days / 7));
+            }
+        }
+
+        return Math.max(1, props.values.length - 1);
+    })();
+
     const labels =
         props.labels.length === props.values.length
             ? props.labels
@@ -75,6 +92,7 @@ const chart = computed(() => {
         gridLines,
         change,
         labels,
+        weeksSpan,
     };
 });
 </script>
@@ -185,7 +203,7 @@ const chart = computed(() => {
                     :fill="chart.change < 0 ? '#15803d' : '#dc2626'"
                 >
                     {{ chart.change >= 0 ? '+' : ''
-                    }}{{ chart.change.toFixed(1) }}% per 7sav
+                    }}{{ chart.change.toFixed(1) }}% per {{ chart.weeksSpan }}sav
                 </text>
             </g>
         </svg>

@@ -4,6 +4,7 @@ import {
     ChefHat,
     LineChart,
     LogOut,
+    Menu,
     RefreshCw,
     Settings,
     ShoppingCart,
@@ -88,7 +89,9 @@ const handleLogout = () => {
     <header
         class="sticky top-0 z-50 border-b border-kainu-border bg-white/88 backdrop-blur-lg"
     >
-        <div class="mx-auto flex h-16 max-w-[1280px] items-center gap-6 px-6">
+        <div
+            class="mx-auto flex h-16 max-w-[1280px] items-center gap-3 px-4 sm:gap-4 sm:px-6 lg:gap-6"
+        >
             <Link :href="home().url" class="flex items-center gap-[10px]">
                 <div
                     class="flex h-8 w-8 items-center justify-center rounded-[9px] bg-[#15803d] text-[15px] font-extrabold tracking-tighter text-white"
@@ -141,18 +144,68 @@ const handleLogout = () => {
                     "
                 >
                     <RefreshCw :size="16" :stroke-width="1.75" />
-                    Skenavimas
+                    Duomenų tvarkymas
                 </Link>
             </nav>
 
             <div class="ml-auto flex items-center gap-1">
+                <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                        <button
+                            type="button"
+                            aria-label="Meniu"
+                            class="inline-flex h-10 w-10 items-center justify-center rounded-[10px] text-stone-700 transition-colors hover:bg-stone-100 lg:hidden"
+                        >
+                            <Menu :size="20" :stroke-width="1.75" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                        align="end"
+                        :side-offset="6"
+                        class="min-w-[220px] rounded-[12px] border-kainu-border p-1"
+                    >
+                        <DropdownMenuItem as-child>
+                            <Link
+                                :href="statsIndex().url"
+                                class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
+                            >
+                                <LineChart :size="15" :stroke-width="1.75" />
+                                Statistika
+                            </Link>
+                        </DropdownMenuItem>
+                        <template v-if="isAdmin">
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem as-child>
+                                <Link
+                                    :href="adminReports().url"
+                                    class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
+                                >
+                                    <ChefHat :size="15" :stroke-width="1.75" />
+                                    Valdymas
+                                </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem as-child>
+                                <Link
+                                    :href="adminScrape().url"
+                                    class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
+                                >
+                                    <RefreshCw :size="15" :stroke-width="1.75" />
+                                    Duomenų tvarkymas
+                                </Link>
+                            </DropdownMenuItem>
+                        </template>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+
                 <Link
                     :href="cartIndex().url"
                     aria-label="Krepšelis"
                     class="relative inline-flex h-10 items-center gap-2 rounded-[10px] px-3 text-stone-700 transition-colors hover:bg-stone-100"
                 >
                     <ShoppingCart :size="18" :stroke-width="1.75" />
-                    <span class="text-[14px] font-medium">Krepšelis</span>
+                    <span class="hidden text-[14px] font-medium sm:inline">
+                        Krepšelis
+                    </span>
                     <span
                         v-if="totalCount > 0"
                         class="inline-flex min-w-[18px] items-center justify-center rounded-full bg-[#15803d] px-[6px] py-px text-[11px] font-bold text-white"
@@ -228,7 +281,7 @@ const handleLogout = () => {
                                 class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
                             >
                                 <RefreshCw :size="15" :stroke-width="1.75" />
-                                Skenavimas
+                                Duomenų tvarkymas
                             </Link>
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />

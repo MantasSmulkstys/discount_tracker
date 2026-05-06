@@ -9,21 +9,16 @@ import TopNav from '@/components/kainu/TopNav.vue';
         <ScraperNoticeBanner />
         <TopNav />
 
-        <main class="mx-auto max-w-[1280px] px-6 pb-16">
+        <main class="mx-auto max-w-[1280px] px-4 pb-16 sm:px-6">
             <slot />
         </main>
 
         <footer
             class="border-t border-[#e7e5e0] bg-white py-8 text-center text-[12px] text-stone-500"
         >
-            <div class="mx-auto max-w-[1280px] px-6">
+            <div class="mx-auto max-w-[1280px] px-4 sm:px-6">
                 <p class="m-0">
-                    Kainų seklys · Sekame kainas 6 didžiausiuose Lietuvos
-                    prekybos tinkluose
-                </p>
-                <p class="m-0 mt-1 text-[11px] text-stone-400">
-                    Nesame susiję su jokia parduotuve. Kainos atnaujinamos kas
-                    parą.
+                    Kainų seklys
                 </p>
             </div>
         </footer>

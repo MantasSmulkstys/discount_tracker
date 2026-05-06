@@ -6,9 +6,10 @@ import {
     ChevronRight,
     LayoutGrid,
     Search,
+    SlidersHorizontal,
     X,
 } from 'lucide-vue-next';
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import {
     store as reportStore,
     destroy as reportDestroy,
@@ -82,6 +83,21 @@ const categoryLabel = computed(() => {
 const priceMax = ref<number>(props.filters.maxPrice ?? 20);
 const discountOnly = ref<boolean>(props.filters.discount);
 const searchInput = ref<string>(props.filters.q ?? '');
+const showFiltersMobile = ref<boolean>(false);
+
+watch(showFiltersMobile, (open) => {
+    if (typeof document === 'undefined') {
+        return;
+    }
+
+    document.documentElement.style.overflow = open ? 'hidden' : '';
+});
+
+onUnmounted(() => {
+    if (typeof document !== 'undefined') {
+        document.documentElement.style.overflow = '';
+    }
+});
 
 watch(
     () => props.filters.maxPrice,
@@ -318,7 +334,30 @@ function storeMeta(storeId: string) {
         </div>
 
         <div class="grid gap-7 lg:grid-cols-[240px_1fr]">
-            <aside class="hidden lg:block">
+            <aside
+                :class="
+                    showFiltersMobile
+                        ? 'fixed inset-0 z-[60] overflow-y-auto bg-[#fafaf7] p-5 lg:static lg:z-auto lg:overflow-visible lg:bg-transparent lg:p-0'
+                        : 'hidden lg:block'
+                "
+            >
+                <div
+                    class="mb-5 flex items-center justify-between lg:hidden"
+                >
+                    <h2
+                        class="text-[18px] font-bold tracking-tight text-stone-900"
+                    >
+                        Filtrai
+                    </h2>
+                    <button
+                        type="button"
+                        aria-label="Uždaryti"
+                        class="flex h-9 w-9 items-center justify-center rounded-full text-stone-500 hover:bg-stone-100"
+                        @click="showFiltersMobile = false"
+                    >
+                        <X :size="18" :stroke-width="2" />
+                    </button>
+                </div>
                 <div class="space-y-6">
                     <div>
                         <h3
@@ -502,6 +541,15 @@ function storeMeta(storeId: string) {
                         Išvalyti filtrus
                     </button>
                 </div>
+
+                <button
+                    type="button"
+                    class="mt-6 w-full rounded-[10px] bg-stone-900 px-4 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#15803d] lg:hidden"
+                    @click="showFiltersMobile = false"
+                >
+                    Rodyti
+                    {{ products.meta.total.toLocaleString('lt-LT') }} prekes
+                </button>
             </aside>
 
             <div>
@@ -509,6 +557,14 @@ function storeMeta(storeId: string) {
                     class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-[#e7e5e0] bg-white px-[14px] py-[10px]"
                 >
                     <div class="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            class="inline-flex items-center gap-1.5 rounded-[8px] border border-[#e7e5e0] bg-white px-3 py-1.5 text-[12px] font-semibold text-stone-700 transition-colors hover:bg-stone-50 lg:hidden"
+                            @click="showFiltersMobile = true"
+                        >
+                            <SlidersHorizontal :size="14" :stroke-width="2" />
+                            Filtrai
+                        </button>
                         <span
                             v-if="filters.stores.length === 0"
                             class="text-[13px] text-stone-500"
