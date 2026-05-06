@@ -8,14 +8,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-/**
- * A specific sellable variant of a normalized product (e.g. "Milk 1L").
- *
- * Variants are the entity referenced by `offer_snapshots.product_variant_id`
- * and `current_offers.product_variant_id`. Two variants of the same product
- * can have very different prices in the same store, which is why the
- * normalized product is the wrong granularity for price tracking.
- */
 class ProductVariant extends Model
 {
     protected $table = 'product_variants';

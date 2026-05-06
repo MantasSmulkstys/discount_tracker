@@ -1,5 +1,3 @@
-// Kainų seklys — shared client-side constants and helpers.
-
 export type StoreId =
     | 'maxima'
     | 'lidl'
@@ -69,11 +67,6 @@ export function resolveStore(value: string | null | undefined): StoreMeta {
     };
 }
 
-/**
- * Category identifiers come from `categories.slug` in the DB now. The frontend
- * never invents categories — it's always rendering whatever taxonomy
- * `KainuCatalog::loadCategoryTree()` ships down.
- */
 export type CategoryId = string;
 
 export type CategoryNode = {
@@ -86,8 +79,6 @@ export type CategoryTreeNode = CategoryNode & {
     subcategories: CategoryNode[];
 };
 
-
-/** Deterministic emoji for a given product name/id — placeholder until photos land. */
 export function emojiForProduct(nameOrId: string): string {
     const lower = nameOrId.toLowerCase();
     const map: Array<[string, string]> = [
@@ -174,7 +165,6 @@ export function emojiForProduct(nameOrId: string): string {
     return fallbacks[hash % fallbacks.length];
 }
 
-/** Deterministic pastel tint for product-image backgrounds. */
 export function pastelTintFor(seed: string | number): string {
     const tints = [
         '#fef9e7',
@@ -196,7 +186,6 @@ export function pastelTintFor(seed: string | number): string {
     return tints[hash % tints.length];
 }
 
-/** Lithuanian currency formatting: `1,99 €` */
 export function formatPrice(value: number | string | null | undefined): string {
     if (value === null || value === undefined || value === '') {
         return '—';
@@ -211,7 +200,6 @@ export function formatPrice(value: number | string | null | undefined): string {
     return n.toFixed(2).replace('.', ',') + ' €';
 }
 
-/** Whole-percent discount from old→new price. Returns 0 when no valid discount. */
 export function discountPct(
     oldPrice: number | null | undefined,
     newPrice: number | null | undefined,
@@ -221,4 +209,10 @@ export function discountPct(
     }
 
     return Math.round((1 - newPrice / oldPrice) * 100);
+}
+
+export function isAmbiguousDiscountCondition(
+    condition: string | null | undefined,
+): boolean {
+    return /^\d+\s*\+\s*\d+$/.test((condition ?? '').trim());
 }

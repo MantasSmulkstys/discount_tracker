@@ -14,14 +14,6 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
-/**
- * Daily safety net: for every active store, if the freshest snapshot's
- * `valid_to` is expiring tomorrow or already past, schedule a fresh scrape +
- * normalization.
- *
- * This catches stores that shifted their leaflet day without us noticing —
- * the per-store cron handles the common case, this fills the gap.
- */
 class ExpiryGuardJob implements ShouldQueue
 {
     use Dispatchable;

@@ -18,10 +18,6 @@ beforeEach(function (): void {
     Cache::flush();
 });
 
-/**
- * Stubs Places searchText so each requested chain gets its own response.
- * Pass an array of arrays keyed `places.0.*` so the controller's parser is happy.
- */
 function fakePlacesAndRoutes(array $placeByChain, array $routePayload): void
 {
     $sequence = Http::sequence();
@@ -82,7 +78,6 @@ test('returns optimised route built from Places lookups + Routes API', function 
         ->assertJsonPath('totalDistanceMeters', 12000)
         ->assertJsonPath('returnLeg.durationSec', 250)
         ->assertJsonCount(2, 'stops')
-        // Google said visit index 1 first (lidl), then index 0 (maxima).
         ->assertJsonPath('stops.0.chain', 'lidl')
         ->assertJsonPath('stops.1.chain', 'maxima')
         ->assertJsonPath('stops.0.name', 'Lidl Centras')
@@ -160,7 +155,6 @@ test('caches Places + Routes lookups, skipping APIs on the second call', functio
     $this->postJson('/cart/route-plan', $payload)->assertOk()
         ->assertJsonPath('polyline', 'cached');
 
-    // Once each — both places and routes results came from cache the second time.
     Http::assertSentCount(2);
 });
 

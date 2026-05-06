@@ -13,13 +13,6 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
-/**
- * Runs the Python scraper for a single store.
- *
- * Wraps `uscraper/scripts/scrape_one_store.py --store <slug>` as a queued
- * subprocess so the admin button returns immediately and the worker handles
- * the long-running fetch.
- */
 class ScrapeStoreJob implements ShouldQueue
 {
     use Dispatchable;

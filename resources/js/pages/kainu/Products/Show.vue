@@ -5,8 +5,8 @@ import {
     ChevronRight,
     Clock,
     LineChart,
-    MapPin,
     Minus,
+    Pencil,
     Plus,
     ShoppingCart,
     Tag,
@@ -17,6 +17,9 @@ import {
     destroy as reportDestroy,
     store as reportStore,
 } from '@/actions/App/Http/Controllers/ProductReportController';
+import EditProductDialog from '@/components/admin/EditProductDialog.vue';
+import type {AdminProduct, CategoryNode} from '@/components/admin/EditProductDialog.vue';
+import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
 import PriceHistoryChart from '@/components/kainu/PriceHistoryChart.vue';
 import ProductCard from '@/components/kainu/ProductCard.vue';
@@ -28,11 +31,18 @@ import type { KainuProduct } from '@/types/kainu';
 
 type StoreOffer = {
     id: number;
+    productId: number;
+    productName: string;
+    imageUrl: string | null;
     store: string;
     storeName: string;
     price: number;
     oldPrice: number | null;
+    condition: string | null;
     url: string | null;
+    sizeLabel: string | null;
+    unitPriceLabel: string | null;
+    isExactMatch: boolean;
 };
 
 const props = defineProps<{
@@ -43,7 +53,21 @@ const props = defineProps<{
     historyLabels: string[];
     historyIsReal: boolean;
     reportedIds: number[];
+    adminEdit: AdminProduct | null;
+    adminCategories: CategoryNode[] | null;
 }>();
+
+const editingProduct = ref<AdminProduct | null>(null);
+
+function openAdminEdit() {
+    if (props.adminEdit) {
+editingProduct.value = props.adminEdit;
+}
+}
+
+function closeAdminEdit() {
+    editingProduct.value = null;
+}
 
 const { addToCart, openDrawer } = useKainuCart();
 
@@ -53,9 +77,12 @@ const isLoggedIn = () => !!page.props.auth?.user;
 function handleToggleReport(product: KainuProduct) {
     if (!isLoggedIn()) {
         router.visit('/login');
+
         return;
     }
+
     const isReported = props.reportedIds.includes(product.normalizedProductId);
+
     if (isReported) {
         router.delete(reportDestroy(product.normalizedProductId).url, {
             preserveScroll: true,
@@ -96,22 +123,6 @@ function handleAdd() {
     openDrawer();
 }
 
-function pickStore(offer: StoreOffer) {
-    selectedStore.value = offer.store;
-    addToCart(
-        {
-            ...props.product,
-            bestPrice: offer.price,
-            oldPrice: offer.oldPrice,
-            bestStore: offer.store,
-            bestStoreName: offer.storeName,
-        },
-        1,
-        offer.store,
-    );
-    openDrawer();
-}
-
 function increment() {
     qty.value = Math.min(99, qty.value + 1);
 }
@@ -146,6 +157,15 @@ function handleAltAdd(alt: KainuProduct) {
                 <ChevronRight :size="12" />
             </template>
             <span class="font-medium text-stone-900">{{ product.name }}</span>
+            <button
+                v-if="adminEdit"
+                type="button"
+                class="ml-auto inline-flex items-center gap-1 rounded-md border border-stone-200 bg-white px-2 py-1 text-[12px] font-medium text-stone-600 hover:border-stone-300 hover:text-stone-900"
+                @click="openAdminEdit"
+            >
+                <Pencil :size="12" />
+                Redaguoti
+            </button>
         </div>
 
         <div class="mb-10 grid grid-cols-1 gap-9 lg:grid-cols-[420px_1fr]">
@@ -237,6 +257,11 @@ function handleAltAdd(alt: KainuProduct) {
                         >
                             sutaupote {{ formatPrice(savings) }}
                         </span>
+                        <ConditionBadge
+                            v-if="product.condition"
+                            :condition="product.condition"
+                            size="sm"
+                        />
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <StoreLogo
@@ -368,72 +393,97 @@ function handleAltAdd(alt: KainuProduct) {
                 </template>
             </h2>
             <div
-                class="overflow-hidden rounded-[12px] border border-[#e7e5e0] bg-white"
+                class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
             >
-                <div
+                <Link
                     v-for="(offer, i) in offers"
                     :key="`${offer.store}-${offer.id}`"
-                    class="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-5 py-[14px]"
+                    :href="`/products/${offer.id}`"
+                    class="group relative flex gap-3 rounded-xl border bg-white p-3 transition-all hover:-translate-y-0.5 hover:shadow-md"
                     :class="[
-                        i < offers.length - 1
-                            ? 'border-b border-[#f5f5f0]'
-                            : '',
-                        i === 0 ? 'bg-brand-50' : 'bg-white',
+                        i === 0
+                            ? 'border-emerald-300 bg-brand-50'
+                            : 'border-stone-200 hover:border-stone-300',
+                        offer.id === product.id ? 'ring-2 ring-stone-300' : '',
                     ]"
                 >
-                    <div class="flex items-center gap-3">
-                        <StoreLogo :store-id="offer.store" :size="32" />
-                        <div>
-                            <div
-                                class="text-[14px] font-semibold text-stone-900"
+                    <ProductImage
+                        :seed="offer.productId"
+                        :src="offer.imageUrl"
+                        :name="offer.productName"
+                        :emoji="product.emoji"
+                        :size="64"
+                        :rounded="8"
+                    />
+                    <div class="flex min-w-0 flex-1 flex-col">
+                        <div class="flex items-center gap-1.5">
+                            <StoreLogo :store-id="offer.store" :size="18" />
+                            <span
+                                class="truncate text-[12px] font-semibold text-stone-700"
                             >
                                 {{ offer.storeName }}
-                            </div>
-                            <div
-                                class="inline-flex items-center gap-1 text-[11px] text-stone-500"
+                            </span>
+                            <span
+                                v-if="offer.sizeLabel"
+                                class="ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+                                :class="
+                                    offer.isExactMatch
+                                        ? 'bg-stone-100 text-stone-600'
+                                        : 'bg-amber-50 text-amber-700'
+                                "
                             >
-                                <MapPin :size="11" />
-                                artimiausia parduotuvė
-                            </div>
-                        </div>
-                    </div>
-                    <DiscountBadge
-                        :pct="discountPct(offer.oldPrice, offer.price)"
-                        size="sm"
-                    />
-                    <div class="text-right">
-                        <div
-                            v-if="
-                                offer.oldPrice && offer.oldPrice > offer.price
-                            "
-                            class="text-[11px] leading-none text-stone-400 line-through"
-                        >
-                            {{ formatPrice(offer.oldPrice) }}
+                                {{ offer.sizeLabel }}
+                            </span>
                         </div>
                         <div
-                            class="mt-[2px] text-[17px] font-bold tracking-tight"
-                            :class="
-                                i === 0 ? 'text-[#15803d]' : 'text-stone-900'
-                            "
+                            class="mt-1 line-clamp-2 text-[12px] leading-snug text-stone-600"
                         >
-                            {{ formatPrice(offer.price) }}
+                            {{ offer.productName }}
+                        </div>
+                        <div class="mt-auto flex items-baseline gap-1.5 pt-2">
+                            <span
+                                class="text-[18px] leading-none font-bold tracking-tight"
+                                :class="
+                                    i === 0
+                                        ? 'text-[#15803d]'
+                                        : 'text-stone-900'
+                                "
+                            >
+                                {{ formatPrice(offer.price) }}
+                            </span>
+                            <span
+                                v-if="
+                                    offer.oldPrice &&
+                                    offer.oldPrice > offer.price
+                                "
+                                class="text-[11px] text-stone-400 line-through"
+                            >
+                                {{ formatPrice(offer.oldPrice) }}
+                            </span>
+                        </div>
+                        <div
+                            v-if="offer.unitPriceLabel"
+                            class="text-[10px] font-medium text-stone-500"
+                        >
+                            {{ offer.unitPriceLabel }}
+                        </div>
+                        <div v-if="offer.condition" class="mt-1.5">
+                            <ConditionBadge
+                                :condition="offer.condition"
+                                size="sm"
+                            />
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        class="rounded-[8px] border px-[14px] py-2 text-[13px] font-semibold whitespace-nowrap transition-colors"
-                        :class="
-                            i === 0
-                                ? 'border-stone-900 bg-stone-900 text-white hover:bg-[#15803d]'
-                                : 'border-[#e7e5e0] bg-[#fafaf7] text-stone-900 hover:border-stone-300'
-                        "
-                        @click="pickStore(offer)"
-                    >
-                        {{ i === 0 ? 'Pridėti' : 'Rinktis' }}
-                    </button>
-                </div>
+                </Link>
             </div>
         </section>
+
+        <EditProductDialog
+            v-if="adminEdit && adminCategories"
+            :product="editingProduct"
+            :categories="adminCategories"
+            @close="closeAdminEdit"
+        />
 
         <section v-if="alternatives.length > 0">
             <h2

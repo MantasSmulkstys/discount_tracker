@@ -15,16 +15,6 @@ use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
-/**
- * Admin scrape controls. Three actions drive the page:
- *
- *   1. Scrape one store (per-store card) → ScrapeStoreJob → NormalizePendingJob
- *   2. Normalize pending raw_offers       → NormalizePendingJob
- *   3. Run full pipeline (all stores)     → ScrapeStoreJob ×N → NormalizePendingJob
- *
- * Each action requires an explicit confirmation in the UI to prevent stray
- * clicks from kicking off long-running (and AI-credit-burning) work.
- */
 class ScrapeController extends Controller
 {
     public function index(): Response

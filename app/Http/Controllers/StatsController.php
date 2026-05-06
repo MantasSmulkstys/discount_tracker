@@ -9,21 +9,8 @@ use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
-/**
- * Public statistics page — surfaces signals that aren't visible on the listing,
- * primarily week-over-week price moves sourced from `price_changes`.
- *
- * The listing already shows every product as discounted (the scraper only
- * collects akcijos pages), so "what's on sale this week" is redundant. What
- * the listing does NOT show is *how prices evolve over weeks* — that's this
- * page's job. Both raises and drops are surfaced; the sign of `changePct`
- * tells the consumer which direction.
- */
 class StatsController extends Controller
 {
-    /**
-     * Maximum number of biggest-change rows surfaced on the page.
-     */
     private const CHANGES_LIMIT = 30;
 
     public function __invoke(): Response
@@ -35,10 +22,6 @@ class StatsController extends Controller
     }
 
     /**
-     * Top N price moves (drops + raises) across all stores, ranked by absolute
-     * change. Returns the latest change per (variant, store) so a price
-     * oscillating across many weeks doesn't dominate the list.
-     *
      * @return array<int, array<string, mixed>>
      */
     private function biggestChanges(): array
@@ -87,8 +70,6 @@ class StatsController extends Controller
     }
 
     /**
-     * Lightweight headline counters for the page header.
-     *
      * @return array<string, int>
      */
     private function summary(): array

@@ -8,14 +8,6 @@ use App\Models\Subcategory;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Verifies that the migration + seed pipeline produces the expected production
- * shape on a clean database. Runs against sqlite :memory: per the TestCase
- * guard, so it can never touch real Postgres data.
- *
- * The Feature suite already runs `RefreshDatabase` (which runs migrations);
- * here we just trigger the seeders.
- */
 beforeEach(function (): void {
     Artisan::call('db:seed', ['--force' => true]);
 });

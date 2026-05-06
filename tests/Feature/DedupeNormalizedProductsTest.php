@@ -5,22 +5,6 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Coverage for the products:dedupe command.
- *
- * Two casing patterns we routinely see in the wild:
- *   - same brand, different case (Mlekovita / MLEKOVITA)
- *   - one row has the brand, the other has NULL
- *
- * The command must collapse those into a single normalized_products row
- * while re-pointing the dependent product_variants, offer_snapshots,
- * current_offers and raw_offers without losing data.
- */
-/**
- * Drop the case-insensitive identity_key unique index so we can seed the
- * dirty pre-migration state (where casing duplicates were possible) that
- * the dedupe command exists to clean up.
- */
 function relaxIdentityKey(): void
 {
     DB::statement('DROP INDEX IF EXISTS normalized_products_identity_key_unique');
@@ -160,8 +144,6 @@ it('drops loser snapshots that clash with keeper on (variant, store, week)', fun
     $vKeeper = seedDedupeVariant($keeper, 200.0, 'g');
     $vLoser = seedDedupeVariant($loser, 200.0, 'g');
 
-    // Both rows have a snapshot for the same week — keeper's wins, loser's
-    // dropped to satisfy the (variant, store, week_starting) unique key.
     seedDedupeSnapshot($vKeeper, $store, '2026-04-27', 1.99);
     seedDedupeSnapshot($vLoser, $store, '2026-04-27', 1.49);
 
@@ -175,15 +157,12 @@ it('--by=content-hash merges nps reached by raws sharing (store, content_hash)',
     relaxIdentityKey();
     $store = seedDedupeStore('aibe');
 
-    // Two normalized_products that should be one: same canonical thing,
-    // AI emitted a slightly different name on the rescrape.
     $keeper = seedDedupeNp('Kiaulienos sprandinės šašlykas su žolelėmis BIOVELA KAUKAZO', 'BIOVELA KAUKAZO');
     $loser = seedDedupeNp('Šaltai marinuotas kiaulienos sprandinės šašlykas su žolelėmis BIOVELA KAUKAZO', 'BIOVELA KAUKAZO');
 
     $vKeeper = seedDedupeVariant($keeper, 700.0, 'g');
     $vLoser = seedDedupeVariant($loser, 700.0, 'g');
 
-    // Both raws share the same content_hash because scraped input was byte-identical.
     $rawA = seedDedupeRawOffer($store, '64f6481a3cb8');
     $rawB = seedDedupeRawOffer($store, '64f6481a3cb8');
 

@@ -10,34 +10,6 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Merges duplicate `normalized_products` rows.
- *
- * Two cluster strategies, selected via `--by`:
- *
- *  - `brand-case` (default): rows that differ only in brand casing or
- *    NULL-vs-filled brand. Cluster key is
- *    `(LOWER(TRIM(normalized_name)), LOWER(TRIM(COALESCE(brand,''))), category_id, subcategory_id)`.
- *
- *  - `content-hash`: rows reached by `raw_offers` that share the same
- *    `(store_id, content_hash)`. Catches AI-driftation across rescrapes
- *    where the raw scraped input was byte-identical but the AI emitted a
- *    different canonical/normalized name (e.g. expanded a description or
- *    dropped a word).
- *
- * The lowest-id row in the cluster is kept. Variants from losers are re-pointed
- * to the keeper, merging on the `product_variants` shape key
- * (size_value, size_unit, package_count, package_unit) and re-routing
- * `offer_snapshots`, `current_offers`, and `price_changes` along the way to
- * respect their unique constraints. Snapshots, current prices, and raw_offers
- * stay intact — only redundant `normalized_products` and clashing variant
- * rows get removed.
- *
- *     php artisan products:dedupe --dry-run                  # preview
- *     php artisan products:dedupe                            # apply (brand-case)
- *     php artisan products:dedupe --by=content-hash --dry-run
- *     php artisan products:dedupe --by=content-hash          # apply
- */
 #[Signature('products:dedupe {--dry-run : Print the plan without changing data} {--by=brand-case : Cluster strategy — brand-case or content-hash}')]
 #[Description('Merge duplicate normalized_products into a single row per cluster.')]
 class DedupeNormalizedProducts extends Command
@@ -140,11 +112,6 @@ class DedupeNormalizedProducts extends Command
     }
 
     /**
-     * Cluster normalized_products by `(store_id, content_hash)` reached
-     * through raw_offers. Two normalized_products that should logically be
-     * one — because raws with byte-identical scraped content map to both —
-     * end up grouped together.
-     *
      * @return Collection<string, array<int, int>>
      */
     private function loadContentHashClusters(): Collection
@@ -220,13 +187,6 @@ class DedupeNormalizedProducts extends Command
         return $stats;
     }
 
-    /**
-     * Re-point every reference from `loserVariantId` to `keeperVariantId`,
-     * respecting the unique/PK constraints on `current_offers` and
-     * `offer_snapshots`. When the keeper already has a row for the same key,
-     * the more recent observation wins for `current_offers`; older snapshots
-     * are dropped (we keep the keeper's, which is at least as fresh).
-     */
     private function repointVariant(int $loserVariantId, int $keeperVariantId): void
     {
         $loserCurrentOffers = DB::table('current_offers')

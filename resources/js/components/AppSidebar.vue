@@ -15,7 +15,7 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
-import { dashboard } from '@/routes';
+import { home } from '@/routes';
 import { reports as adminReports } from '@/routes/admin';
 import type { NavItem } from '@/types';
 
@@ -25,7 +25,7 @@ const isAdmin = computed(() => page.props.auth?.user?.role === 'admin');
 const mainNavItems: NavItem[] = [
     {
         title: 'Deals',
-        href: dashboard(),
+        href: home(),
         icon: LayoutGrid,
     },
 ];
@@ -45,7 +45,7 @@ const footerNavItems: NavItem[] = [];
             <SidebarMenu>
                 <SidebarMenuItem>
                     <SidebarMenuButton size="lg" as-child>
-                        <Link :href="dashboard()">
+                        <Link :href="home()">
                             <AppLogo />
                         </Link>
                     </SidebarMenuButton>

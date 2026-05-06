@@ -8,12 +8,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-/**
- * One scraper run for one store in one promo week.
- *
- * `(store_id, week_starting)` is unique — re-running the scraper for the same
- * Monday reuses the existing batch instead of creating a duplicate.
- */
 class ScrapeBatch extends Model
 {
     protected $table = 'scrape_batches';

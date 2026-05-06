@@ -43,9 +43,7 @@ if (typeof window !== 'undefined') {
         (next) => {
             try {
                 window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            } catch {
-                /* quota exceeded or disabled storage — ignore */
-            }
+            } catch {}
         },
         { deep: true },
     );

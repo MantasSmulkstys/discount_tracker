@@ -5,11 +5,8 @@ import { computed } from 'vue';
 import type { CategoryTreeNode } from '@/lib/kainu';
 
 type Props = {
-    /** Full category taxonomy from `KainuCatalog::loadCategoryTree()`. */
     tree: CategoryTreeNode[];
-    /** Currently active top-level category slug, or 'all'. */
     activeCategory?: string;
-    /** Currently active subcategory slug, or 'all'. */
     activeSubcategory?: string;
 };
 
@@ -18,20 +15,17 @@ const props = withDefaults(defineProps<Props>(), {
     activeSubcategory: 'all',
 });
 
-/**
- * Build a query string for a (category, subcategory) target. Subcategory only
- * makes sense within a chosen category — selecting "all subcategories" simply
- * drops the param.
- */
 function hrefFor(categorySlug: string, subcategorySlug?: string): string {
     if (categorySlug === 'all') {
         return '/products';
     }
 
     const params = new URLSearchParams({ category: categorySlug });
+
     if (subcategorySlug && subcategorySlug !== 'all') {
         params.set('subcategory', subcategorySlug);
     }
+
     return `/products?${params.toString()}`;
 }
 
@@ -42,7 +36,6 @@ const activeNode = computed(
 
 <template>
     <div>
-        <!-- Top-level pills (horizontal scroll on mobile). -->
         <div class="kainu-scrollbar-hide -mx-6 overflow-x-auto px-6">
             <div class="flex min-w-max gap-2 pb-1">
                 <Link
@@ -74,7 +67,6 @@ const activeNode = computed(
             </div>
         </div>
 
-        <!-- Subcategory drill-down appears only when a top-level is selected. -->
         <div
             v-if="activeNode && activeNode.subcategories.length > 0"
             class="kainu-scrollbar-hide -mx-6 mt-2 overflow-x-auto px-6"

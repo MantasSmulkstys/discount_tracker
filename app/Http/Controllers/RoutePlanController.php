@@ -16,16 +16,6 @@ use RuntimeException;
 
 class RoutePlanController extends Controller
 {
-    /**
-     * Round-trip route planner for a cart spread across N store chains.
-     *
-     * For each requested chain, asks Google Places (Text Search, biased to a
-     * 15 km circle around the user's origin) for the nearest physical store —
-     * no static lookup table involved. The resulting stops are sent to the
-     * Routes API which optimises the visit order and returns a polyline plus
-     * per-leg durations. Both the per-chain Places lookup and the final
-     * Routes call are cached so retries and shared links don't re-bill.
-     */
     public function __invoke(
         CartRoutePlanRequest $request,
         RoutesApiClient $routes,
@@ -82,10 +72,6 @@ class RoutePlanController extends Controller
     }
 
     /**
-     * Resolve each requested chain to a single Place near the user. Cached
-     * per (chain, rounded origin) so repeat planning of the same cart on the
-     * same day doesn't re-bill Places.
-     *
      * @param  array{lat: float, lng: float}  $origin
      * @param  list<string>  $chains
      * @return list<array{chain: string, name: string, address: string, city: string, lat: float, lng: float}>
@@ -129,11 +115,6 @@ class RoutePlanController extends Controller
     }
 
     /**
-     * Per-chain Places search query. We default to title-casing the slug
-     * (`maxima` → `Maxima`), but the `stores` table can override via a
-     * (future) `search_query` column — we read it here so admins can tune
-     * specific chains without code changes.
-     *
      * @param  list<string>  $chains
      * @return array<string, string>
      */

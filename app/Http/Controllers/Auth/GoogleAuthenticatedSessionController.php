@@ -53,9 +53,6 @@ class GoogleAuthenticatedSessionController extends Controller
         }
     }
 
-    /**
-     * When Google credentials are missing from the environment, don't leak a 500 — act as if the route isn't registered.
-     */
     private function ensureGoogleIsConfigured(): void
     {
         abort_if(

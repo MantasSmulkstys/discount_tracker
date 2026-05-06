@@ -16,11 +16,10 @@ onMounted(() => {
 
 const dismiss = () => {
     visible.value = false;
+
     try {
         localStorage.setItem(STORAGE_KEY, '1');
-    } catch {
-        // localStorage unavailable (private mode, etc.) — banner will reappear next visit
-    }
+    } catch {}
 };
 </script>
 

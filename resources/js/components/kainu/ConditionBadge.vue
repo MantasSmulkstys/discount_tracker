@@ -10,12 +10,6 @@ const props = withDefaults(defineProps<Props>(), {
     size: 'md',
 });
 
-/**
- * Brand-green badge for promo conditions like "1+1", "2+1" or coupon notes.
- * Visually identical to {@see DiscountBadge} on purpose — they're mutually
- * exclusive on a card (the card chooses condition over discount when both
- * exist) so a unified style avoids visual noise.
- */
 const classes = computed(() => {
     switch (props.size) {
         case 'sm':

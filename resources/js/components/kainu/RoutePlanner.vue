@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useHttp } from '@inertiajs/vue3';
-import { configureMaps, loadMapsLibrary } from '@/composables/useGoogleMaps';
 import {
     AlertTriangle,
     Car,
@@ -16,8 +15,9 @@ import {
     TriangleAlert,
 } from 'lucide-vue-next';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { resolveStore } from '@/lib/kainu';
 import RoutePlanController from '@/actions/App/Http/Controllers/RoutePlanController';
+import { configureMaps, loadMapsLibrary } from '@/composables/useGoogleMaps';
+import { resolveStore } from '@/lib/kainu';
 
 type TravelMode = 'walking' | 'driving';
 type LatLng = { lat: number; lng: number };
@@ -43,11 +43,8 @@ type RoutePlan = {
 };
 
 const props = defineProps<{
-    /** Chain slugs from the cart (e.g. ['maxima', 'lidl']). */
     chains: string[];
-    /** Whether a Google Maps API key is configured server-side. */
     hasMapsKey: boolean;
-    /** Maps API key for the browser-side autocomplete. */
     apiKey: string | null;
 }>();
 
@@ -79,18 +76,20 @@ const planForm = useHttp<RoutePlanForm, RoutePlan>({
     mode: 'driving',
 });
 
-const canPlan = computed(() => props.chains.length > 0 && props.hasMapsKey);
-
 const formatDuration = (sec: number): string => {
     if (sec < 60) {
         return `${sec}s`;
     }
+
     const totalMin = Math.round(sec / 60);
+
     if (totalMin < 60) {
         return `${totalMin} min`;
     }
+
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
+
     return m === 0 ? `${h} h` : `${h} h ${m} min`;
 };
 
@@ -98,7 +97,9 @@ const formatDistance = (m: number): string => {
     if (m < 1000) {
         return `${m} m`;
     }
+
     const km = m / 1000;
+
     return `${km.toFixed(km < 10 ? 1 : 0)} km`;
 };
 
@@ -121,8 +122,10 @@ async function ensureAutocomplete(): Promise<void> {
         const lng = place?.geometry?.location?.lng();
 
         if (lat === undefined || lng === undefined) {
-            errorMessage.value = 'Pasirinktam adresui nepavyko gauti koordinačių. Pabandykite kitą.';
+            errorMessage.value =
+                'Pasirinktam adresui nepavyko gauti koordinačių. Pabandykite kitą.';
             status.value = 'error';
+
             return;
         }
 
@@ -156,10 +159,12 @@ const fetchPlan = async (
         emit('plan', data);
         status.value = 'ready';
     } catch (e) {
-        const detail =
-            (e as { response?: { data?: { detail?: string; message?: string } } })?.response?.data;
+        const detail = (
+            e as { response?: { data?: { detail?: string; message?: string } } }
+        )?.response?.data;
         errorMessage.value =
-            detail?.detail ?? detail?.message ??
+            detail?.detail ??
+            detail?.message ??
             (e instanceof Error
                 ? e.message
                 : 'Nepavyko apskaičiuoti maršruto.');
@@ -173,6 +178,7 @@ const useMyLocation = (): void => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
         errorMessage.value = 'Naršyklė nepalaiko vietos nustatymo.';
         status.value = 'error';
+
         return;
     }
 
@@ -181,7 +187,10 @@ const useMyLocation = (): void => {
 
     navigator.geolocation.getCurrentPosition(
         (pos) => {
-            const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            const next = {
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+            };
             origin.value = next;
             originLabel.value = 'Mano vieta';
             emit('origin', next);
@@ -202,13 +211,14 @@ const switchMode = async (next: TravelMode): Promise<void> => {
     if (mode.value === next) {
         return;
     }
+
     mode.value = next;
+
     if (origin.value) {
         await fetchPlan(origin.value, next);
     }
 };
 
-// Drop a stale plan if the cart contents changed after planning.
 watch(
     () => props.chains.join('|'),
     () => {
@@ -216,6 +226,7 @@ watch(
             plan.value = null;
             emit('plan', null);
         }
+
         if (origin.value) {
             void fetchPlan(origin.value, mode.value);
         }
@@ -237,6 +248,7 @@ const googleMapsLink = computed<string | null>(() => {
     if (!plan.value || !origin.value) {
         return null;
     }
+
     const o = origin.value;
     const params = new URLSearchParams({
         api: '1',
@@ -245,6 +257,7 @@ const googleMapsLink = computed<string | null>(() => {
         waypoints: plan.value.stops.map((s) => `${s.lat},${s.lng}`).join('|'),
         travelmode: plan.value.mode,
     });
+
     return `https://www.google.com/maps/dir/?${params.toString()}`;
 });
 </script>
@@ -254,9 +267,15 @@ const googleMapsLink = computed<string | null>(() => {
         class="flex flex-col gap-4 rounded-[16px] border border-kainu-border bg-white p-5"
     >
         <header class="flex items-start gap-2">
-            <RouteIcon :size="16" :stroke-width="2" class="mt-0.5 text-brand-700" />
+            <RouteIcon
+                :size="16"
+                :stroke-width="2"
+                class="mt-0.5 text-brand-700"
+            />
             <div class="flex-1">
-                <h3 class="text-[15px] font-semibold tracking-tight text-stone-900">
+                <h3
+                    class="text-[15px] font-semibold tracking-tight text-stone-900"
+                >
                     Apsipirkimo maršrutas
                 </h3>
                 <p class="mt-0.5 text-[12px] text-stone-500">
@@ -270,11 +289,22 @@ const googleMapsLink = computed<string | null>(() => {
             v-if="!hasMapsKey"
             class="flex items-start gap-2 rounded-[10px] bg-amber-50 px-3 py-2.5 text-[12px] text-amber-900"
         >
-            <AlertTriangle :size="14" :stroke-width="2" class="mt-0.5 shrink-0" />
+            <AlertTriangle
+                :size="14"
+                :stroke-width="2"
+                class="mt-0.5 shrink-0"
+            />
             <span>
                 Google Maps raktas nenustatytas — pridėkite
-                <code class="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px]">GOOGLE_MAPS_API_KEY</code>
-                į <code class="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px]">.env</code>.
+                <code
+                    class="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px]"
+                    >GOOGLE_MAPS_API_KEY</code
+                >
+                į
+                <code
+                    class="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px]"
+                    >.env</code
+                >.
             </span>
         </div>
 
@@ -297,7 +327,11 @@ const googleMapsLink = computed<string | null>(() => {
                     <div
                         class="flex min-w-0 flex-1 items-center gap-2 rounded-[10px] border border-kainu-border bg-white px-3 py-2 focus-within:border-stone-300"
                     >
-                        <MapPin :size="14" :stroke-width="2" class="shrink-0 text-stone-400" />
+                        <MapPin
+                            :size="14"
+                            :stroke-width="2"
+                            class="shrink-0 text-stone-400"
+                        />
                         <input
                             id="route-origin-input"
                             ref="addressInput"
@@ -309,7 +343,9 @@ const googleMapsLink = computed<string | null>(() => {
                     </div>
                     <button
                         type="button"
-                        :disabled="status === 'locating' || status === 'planning'"
+                        :disabled="
+                            status === 'locating' || status === 'planning'
+                        "
                         class="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-[10px] border border-kainu-border bg-kainu-surface px-3 text-[12px] font-medium text-stone-700 transition-colors hover:bg-white disabled:opacity-50"
                         @click="useMyLocation"
                     >
@@ -326,7 +362,9 @@ const googleMapsLink = computed<string | null>(() => {
                 </div>
             </div>
 
-            <div class="flex items-center gap-1 rounded-[10px] bg-kainu-surface p-1">
+            <div
+                class="flex items-center gap-1 rounded-[10px] bg-kainu-surface p-1"
+            >
                 <button
                     type="button"
                     class="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[8px] text-[12px] font-medium transition-colors"
@@ -368,7 +406,11 @@ const googleMapsLink = computed<string | null>(() => {
                 v-else-if="status === 'idle' && !plan"
                 class="flex items-start gap-2 rounded-[10px] border border-dashed border-kainu-border bg-kainu-surface px-3 py-3 text-[12px] text-stone-500"
             >
-                <Navigation :size="14" :stroke-width="2" class="mt-0.5 shrink-0" />
+                <Navigation
+                    :size="14"
+                    :stroke-width="2"
+                    class="mt-0.5 shrink-0"
+                />
                 <span>
                     Pradžios adresą galite pasirinkti iš pasiūlymų sąrašo arba
                     spauskite <strong>„Naudoti mano vietą“</strong>.
@@ -379,7 +421,11 @@ const googleMapsLink = computed<string | null>(() => {
                 v-if="status === 'error' && errorMessage"
                 class="flex items-start gap-2 rounded-[10px] bg-red-50 px-3 py-2.5 text-[12px] text-red-700"
             >
-                <TriangleAlert :size="14" :stroke-width="2" class="mt-0.5 shrink-0" />
+                <TriangleAlert
+                    :size="14"
+                    :stroke-width="2"
+                    class="mt-0.5 shrink-0"
+                />
                 <span>{{ errorMessage }}</span>
             </div>
 
@@ -387,18 +433,28 @@ const googleMapsLink = computed<string | null>(() => {
                 v-if="plan"
                 class="flex flex-col gap-3 rounded-[12px] border border-kainu-border bg-kainu-surface p-4"
             >
-                <div class="flex items-center justify-between text-[12px] text-stone-500">
+                <div
+                    class="flex items-center justify-between text-[12px] text-stone-500"
+                >
                     <div class="flex items-center gap-1.5">
                         <Clock :size="13" :stroke-width="2" />
                         <span>Bendras laikas</span>
                     </div>
-                    <span class="text-[15px] font-bold text-stone-900 tabular-nums">
+                    <span
+                        class="text-[15px] font-bold text-stone-900 tabular-nums"
+                    >
                         {{ formatDuration(plan.totalDurationSec) }}
                     </span>
                 </div>
-                <div class="flex items-center justify-between text-[12px] text-stone-500">
+                <div
+                    class="flex items-center justify-between text-[12px] text-stone-500"
+                >
                     <div class="flex items-center gap-1.5">
-                        <Footprints v-if="plan.mode === 'walking'" :size="13" :stroke-width="2" />
+                        <Footprints
+                            v-if="plan.mode === 'walking'"
+                            :size="13"
+                            :stroke-width="2"
+                        />
                         <Car v-else :size="13" :stroke-width="2" />
                         <span>Atstumas</span>
                     </div>
@@ -416,16 +472,23 @@ const googleMapsLink = computed<string | null>(() => {
                 >
                     <span
                         class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-bold text-white"
-                        :style="{ backgroundColor: resolveStore(stop.chain).color }"
+                        :style="{
+                            backgroundColor: resolveStore(stop.chain).color,
+                        }"
                     >
                         {{ idx + 1 }}
                     </span>
                     <div class="min-w-0 flex-1">
-                        <div class="truncate text-[13px] font-semibold text-stone-900">
+                        <div
+                            class="truncate text-[13px] font-semibold text-stone-900"
+                        >
                             {{ stop.name }}
                         </div>
                         <div class="truncate text-[11px] text-stone-500">
-                            {{ stop.address }}<template v-if="stop.city">, {{ stop.city }}</template>
+                            {{ stop.address
+                            }}<template v-if="stop.city"
+                                >, {{ stop.city }}</template
+                            >
                         </div>
                     </div>
                     <div class="shrink-0 text-right text-[11px] text-stone-500">
@@ -433,14 +496,20 @@ const googleMapsLink = computed<string | null>(() => {
                             {{ formatDuration(stop.durationFromPreviousSec) }}
                         </div>
                         <div class="tabular-nums">
-                            {{ formatDistance(stop.distanceFromPreviousMeters) }}
+                            {{
+                                formatDistance(stop.distanceFromPreviousMeters)
+                            }}
                         </div>
                     </div>
                 </li>
                 <li
                     class="flex items-center gap-3 rounded-[12px] border border-dashed border-kainu-border bg-kainu-surface px-3 py-3 text-[12px] text-stone-500"
                 >
-                    <MapPinned :size="16" :stroke-width="2" class="shrink-0 text-stone-400" />
+                    <MapPinned
+                        :size="16"
+                        :stroke-width="2"
+                        class="shrink-0 text-stone-400"
+                    />
                     <span class="flex-1">Grįžimas į pradžios vietą</span>
                     <div class="shrink-0 text-right">
                         <div class="font-semibold text-stone-700">

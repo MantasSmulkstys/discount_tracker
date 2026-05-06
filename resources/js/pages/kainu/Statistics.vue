@@ -10,7 +10,7 @@ import {
 } from 'lucide-vue-next';
 import { computed } from 'vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
-import KainuLayout from '@/Layouts/KainuLayout.vue';
+import KainuLayout from '@/layouts/KainuLayout.vue';
 
 defineOptions({ layout: KainuLayout });
 
@@ -48,6 +48,7 @@ const formatPrice = (value: number | null) =>
 
 const formatPct = (value: number) => {
     const rounded = Math.round(value);
+
     return `${rounded > 0 ? '+' : ''}${rounded}%`;
 };
 

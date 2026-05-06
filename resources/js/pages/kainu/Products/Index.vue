@@ -1,6 +1,5 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { store as reportStore, destroy as reportDestroy } from '@/actions/App/Http/Controllers/ProductReportController';
 import {
     Check,
     ChevronLeft,
@@ -10,7 +9,10 @@ import {
     X,
 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import CategoryPills from '@/components/kainu/CategoryPills.vue';
+import {
+    store as reportStore,
+    destroy as reportDestroy,
+} from '@/actions/App/Http/Controllers/ProductReportController';
 import ProductCard from '@/components/kainu/ProductCard.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
@@ -47,14 +49,17 @@ const props = defineProps<{
 
 const { addToCart, openDrawer } = useKainuCart();
 
-const activeCategoryNode = computed(() =>
-    props.categoryTree.find((n) => n.slug === props.filters.category) ?? null,
+const activeCategoryNode = computed(
+    () =>
+        props.categoryTree.find((n) => n.slug === props.filters.category) ??
+        null,
 );
 
 const activeSubcategoryNode = computed(() => {
     if (!activeCategoryNode.value || props.filters.subcategory === 'all') {
         return null;
     }
+
     return (
         activeCategoryNode.value.subcategories.find(
             (s) => s.slug === props.filters.subcategory,
@@ -66,9 +71,11 @@ const categoryLabel = computed(() => {
     if (activeSubcategoryNode.value) {
         return activeSubcategoryNode.value.name;
     }
+
     if (activeCategoryNode.value) {
         return activeCategoryNode.value.name;
     }
+
     return 'Visi pasiūlymai';
 });
 
@@ -102,6 +109,7 @@ function onSearchInput() {
     if (searchDebounce) {
         clearTimeout(searchDebounce);
     }
+
     searchDebounce = setTimeout(() => {
         if (searchInput.value !== (props.filters.q ?? '')) {
             updateFilters({ q: searchInput.value.trim() });
@@ -113,7 +121,9 @@ function clearSearch() {
     if (searchDebounce) {
         clearTimeout(searchDebounce);
     }
+
     searchInput.value = '';
+
     if (props.filters.q) {
         updateFilters({ q: '' });
     }
@@ -172,8 +182,6 @@ function toggleStore(storeId: string) {
 }
 
 function setCategory(categorySlug: string) {
-    // Switching category clears any subcategory selection — different
-    // categories don't share subcategories.
     updateFilters({ category: categorySlug, subcategory: 'all' });
 }
 
@@ -220,19 +228,26 @@ const isLoggedIn = () => !!page.props.auth?.user;
 function handleToggleReport(product: KainuProduct) {
     if (!isLoggedIn()) {
         router.visit('/login');
+
         return;
     }
+
     const isReported = props.reportedIds.includes(product.normalizedProductId);
+
     if (isReported) {
         router.delete(reportDestroy(product.normalizedProductId).url, {
             preserveScroll: true,
             preserveState: true,
         });
     } else {
-        router.post(reportStore(product.normalizedProductId).url, {}, {
-            preserveScroll: true,
-            preserveState: true,
-        });
+        router.post(
+            reportStore(product.normalizedProductId).url,
+            {},
+            {
+                preserveScroll: true,
+                preserveState: true,
+            },
+        );
     }
 }
 
@@ -255,8 +270,7 @@ function storeMeta(storeId: string) {
                     :href="`/products?category=${activeCategoryNode.slug}`"
                     class="hover:text-stone-700"
                     :class="{
-                        'font-medium text-stone-900':
-                            !activeSubcategoryNode,
+                        'font-medium text-stone-900': !activeSubcategoryNode,
                     }"
                 >
                     {{ activeCategoryNode.name }}
@@ -341,7 +355,6 @@ function storeMeta(storeId: string) {
                                     <span class="flex-1">{{ c.name }}</span>
                                 </button>
 
-                                <!-- Subcategories indent under the active category. -->
                                 <div
                                     v-if="
                                         c.slug === filters.category &&

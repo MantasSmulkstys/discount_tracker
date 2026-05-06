@@ -7,15 +7,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-/**
- * The latest known price for one (store, variant) pair — one row only.
- *
- * This is the table the public UI should read for "what does this product cost
- * right now in store X?" and "which store is cheapest?". The Python normalizer
- * upserts a row here every time it inserts a snapshot.
- *
- * Composite primary key: (store_id, product_variant_id). No surrogate id.
- */
 class CurrentOffer extends Model
 {
     protected $table = 'current_offers';

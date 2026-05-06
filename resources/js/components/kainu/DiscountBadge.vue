@@ -10,13 +10,6 @@ const props = withDefaults(defineProps<Props>(), {
     size: 'md',
 });
 
-/**
- * Brand-green rectangular badge. Matches the site's primary green so it reads
- * as part of the product card rather than a foreign sticker. The card hides
- * this badge when a price is shown — the strikethrough old price already
- * communicates the discount visually — so this only appears for priceless
- * promos.
- */
 const classes = computed(() => {
     switch (props.size) {
         case 'sm':

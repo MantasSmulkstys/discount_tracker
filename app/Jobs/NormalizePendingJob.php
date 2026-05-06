@@ -12,14 +12,6 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
-/**
- * Runs the AI normalization script over all `raw_offers` whose
- * `normalization_status = 'pending'`.
- *
- * The Python script is idempotent — already-normalized rows are not touched
- * and don't consume new AI credits, so chaining this after every scrape is
- * safe even when the scrape produced no new variants.
- */
 class NormalizePendingJob implements ShouldQueue
 {
     use Dispatchable;

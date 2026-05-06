@@ -14,14 +14,6 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Per-store scheduled scrapes. Each store row carries its own cron expression
-// so admins can tune the schedule from the UI without a code deploy. We chain
-// normalization after the scrape so freshly-inserted raw_offers get processed
-// in the same run.
-//
-// Wrapped defensively because this file is parsed every time artisan boots —
-// during install, in CI, or when the DB driver is missing — and we don't want
-// to break unrelated commands just because the stores table isn't reachable.
 try {
     if (Schema::hasTable('stores') && Schema::hasColumn('stores', 'scrape_cron')) {
         Store::query()
@@ -41,9 +33,6 @@ try {
             });
     }
 } catch (Throwable) {
-    // DB unreachable at boot — skip per-store scheduling, fall through.
 }
 
-// Daily safety net: refresh any store whose freshest snapshot is about to
-// expire. Catches stores that shift their leaflet release day.
 Schedule::job(new ExpiryGuardJob)->dailyAt('05:00')->name('expiry-guard');

@@ -5,18 +5,6 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 
-/**
- * Feature coverage for the public /statistika page.
- *
- * Two cases that matter for the thesis demo:
- *  - empty `price_changes` (week 1, before any real diffs exist) → page shows
- *    the empty-state copy and the summary counters.
- *  - populated `price_changes` (week 2+ or after MockPriceChangesSeeder) →
- *    page shows both raises and drops in `biggestChanges`, ranked by absolute
- *    change.
- *
- * Per the TestCase guard, this runs against sqlite :memory:.
- */
 function seedStoreVariantSnapshot(string $storeName, string $productName, float $price, ?float $changePct = null): array
 {
     $storeId = DB::table('stores')->insertGetId([
@@ -94,8 +82,6 @@ it('returns biggest changes sorted by absolute change_pct desc', function (): vo
         fn (Assert $page) => $page
             ->component('kainu/Statistics')
             ->has('biggestChanges', 3)
-            // Largest absolute move sorts first.
-            // SQLite returns whole-number numerics as int, hence the cast.
             ->where('biggestChanges.0.changePct', fn ($v) => (float) $v === -40.0)
             ->where('biggestChanges.0.productName', 'Sviestas 200g')
             ->where('biggestChanges.2.changePct', fn ($v) => (float) $v === -10.0)
@@ -118,7 +104,6 @@ it('includes price raises alongside drops, ranked by absolute change', function 
             ->where('summary.totalDrops', 1)
             ->where('summary.totalRaises', 2)
             ->has('biggestChanges', 3)
-            // |30| > |-15| > |5|
             ->where('biggestChanges.0.changePct', fn ($v) => (float) $v === 30.0)
             ->where('biggestChanges.0.productName', 'Rise')
             ->where('biggestChanges.1.changePct', fn ($v) => (float) $v === -15.0)

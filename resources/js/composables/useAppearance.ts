@@ -75,13 +75,9 @@ export function initializeTheme(): void {
         return;
     }
 
-    // Initialize theme from saved preference; default to light because the
-    // storefront only ships a light design and system dark preferences were
-    // silently flipping auth inputs / cards to dark styling.
     const savedAppearance = getStoredAppearance();
     updateTheme(savedAppearance || 'light');
 
-    // Set up system theme change listener...
     mediaQuery()?.addEventListener('change', handleSystemThemeChange);
 }
 
@@ -109,10 +105,8 @@ export function useAppearance(): UseAppearanceReturn {
     function updateAppearance(value: Appearance) {
         appearance.value = value;
 
-        // Store in localStorage for client-side persistence...
         localStorage.setItem('appearance', value);
 
-        // Store in cookie for SSR...
         setCookie('appearance', value);
 
         updateTheme(value);

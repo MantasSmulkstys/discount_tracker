@@ -37,9 +37,7 @@ if (typeof window !== 'undefined') {
                     STORAGE_KEY,
                     JSON.stringify(Array.from(next)),
                 );
-            } catch {
-                /* ignore */
-            }
+            } catch {}
         },
         { deep: true },
     );

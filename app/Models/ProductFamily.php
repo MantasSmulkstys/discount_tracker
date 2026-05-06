@@ -8,10 +8,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-/**
- * A grouping above brand — e.g. "all milk products" — used to compare prices
- * across competing brands of the same generic product.
- */
 class ProductFamily extends Model
 {
     protected $table = 'product_families';

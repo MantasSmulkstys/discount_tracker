@@ -8,15 +8,6 @@ use RuntimeException;
 
 abstract class TestCase extends BaseTestCase
 {
-    /**
-     * Hard safety net: refuse to run if the active connection points anywhere
-     * other than an in-memory sqlite database.
-     *
-     * The test suite previously wiped real PostgreSQL data when a misconfigured
-     * run hit the dev database. This guard makes that class of incident
-     * impossible — if the connection is wrong, the suite aborts before any
-     * migration, RefreshDatabase trait, or query can fire.
-     */
     protected function setUp(): void
     {
         parent::setUp();

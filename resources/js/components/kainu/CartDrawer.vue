@@ -236,12 +236,6 @@ watch(isOpen, (open) => {
                     Peržiūrėti krepšelį · {{ formatPrice(subtotal) }}
                     <ArrowRight :size="16" :stroke-width="2" />
                 </Link>
-                <button
-                    type="button"
-                    class="mt-[6px] w-full rounded px-4 py-2 text-[12px] font-medium text-stone-700 transition-colors hover:bg-stone-100"
-                >
-                    Išsaugoti kaip savaitės sąrašą
-                </button>
             </div>
         </aside>
     </Teleport>

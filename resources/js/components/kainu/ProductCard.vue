@@ -6,7 +6,11 @@ import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
-import { discountPct, formatPrice } from '@/lib/kainu';
+import {
+    discountPct,
+    formatPrice,
+    isAmbiguousDiscountCondition,
+} from '@/lib/kainu';
 import type { KainuProduct } from '@/types/kainu';
 
 type Props = {
@@ -25,38 +29,36 @@ const emit = defineEmits<{
     (e: 'toggle-report', product: KainuProduct): void;
 }>();
 
-/**
- * Effective discount in whole percent. Clamped to [0, 99] — anything outside
- * that range is data corruption (negative discounts from "3+1"-style cards
- * where price/old_price aren't real apples-to-apples values, or >=100% from
- * old_price=0 edge cases) and gets dropped to 0 so we don't render nonsense.
- */
 const pct = computed(() => {
     const raw = (() => {
         const explicit = props.product.discount;
+
         if (typeof explicit === 'number' && explicit > 0) {
             return Math.round(explicit);
         }
+
         return discountPct(props.product.oldPrice, props.product.bestPrice);
     })();
+
     return raw > 0 && raw < 100 ? raw : 0;
 });
 
 const condition = computed(() => props.product.condition?.trim() ?? '');
-
-/**
- * The discount badge is only shown when there's no price to display. When a
- * price IS shown, the strikethrough old price already conveys the discount
- * — adding a badge on top is visual noise. The condition badge always wins
- * over the discount badge because conditions like "3+1" make percentage
- * math misleading even when the numbers parse cleanly.
- */
-const showDiscountBadge = computed(
-    () =>
-        pct.value > 0 &&
-        props.product.bestPrice === null &&
-        condition.value === '',
+const conditionIsAmbiguous = computed(() =>
+    isAmbiguousDiscountCondition(condition.value),
 );
+
+const showDiscountBadge = computed(() => {
+    if (pct.value <= 0) {
+        return false;
+    }
+
+    if (condition.value === '') {
+        return props.product.bestPrice === null;
+    }
+
+    return !conditionIsAmbiguous.value;
+});
 const showConditionBadge = computed(() => condition.value !== '');
 
 const imageSize = computed(() => (props.compact ? 90 : 110));
@@ -95,7 +97,9 @@ const handleReport = (event: MouseEvent) => {
 
         <button
             type="button"
-            :aria-label="reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'"
+            :aria-label="
+                reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'
+            "
             :title="reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'"
             class="absolute top-2 right-2 z-[1] flex h-7 w-7 items-center justify-center rounded-full border transition-colors"
             :class="

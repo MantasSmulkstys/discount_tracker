@@ -1,14 +1,5 @@
 import { importLibrary, setOptions } from '@googlemaps/js-api-loader';
 
-/**
- * Shared loader for the Google Maps JavaScript API.
- *
- * `setOptions()` may only be called once per page load, before any
- * `importLibrary()` call. Multiple components (the cart map, the route
- * planner's address autocomplete, …) need the same SDK, so we centralize
- * the bootstrap here and gate it with a module-scoped flag.
- */
-
 let configured = false;
 let configuredKey: string | null = null;
 
@@ -26,6 +17,7 @@ export function configureMaps({ apiKey, mapId }: MapsBootstrap): void {
                 '[useGoogleMaps] setOptions has already been called with a different key; the first one is in effect.',
             );
         }
+
         return;
     }
 
@@ -40,6 +32,8 @@ export function configureMaps({ apiKey, mapId }: MapsBootstrap): void {
     configuredKey = apiKey;
 }
 
-export async function loadMapsLibrary<T = unknown>(name: MapsLibrary): Promise<T> {
+export async function loadMapsLibrary<T = unknown>(
+    name: MapsLibrary,
+): Promise<T> {
     return importLibrary(name) as Promise<T>;
 }

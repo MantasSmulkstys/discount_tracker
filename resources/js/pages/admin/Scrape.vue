@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
 import {
     Bot,
     Loader2,
     Store as StoreIcon,
     TriangleAlert,
+    Upload,
     Workflow,
 } from 'lucide-vue-next';
 import { ref } from 'vue';
+import { store as importStoreAction } from '@/actions/App/Http/Controllers/Admin/StoreImportController';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -63,6 +65,7 @@ function describe(action: ConfirmAction): { title: string; description: string }
                 'Naudoja OpenAI kreditus jei rasta naujų variantų.',
         };
     }
+
     return ACTION_LABELS[action.kind];
 }
 
@@ -71,13 +74,19 @@ function ask(action: ConfirmAction) {
 }
 
 function cancel() {
-    if (submitting.value) return;
+    if (submitting.value) {
+return;
+}
+
     pendingAction.value = null;
 }
 
 function confirm() {
     const action = pendingAction.value;
-    if (!action || submitting.value) return;
+
+    if (!action || submitting.value) {
+return;
+}
 
     submitting.value = true;
 
@@ -98,6 +107,33 @@ function confirm() {
         router.post('/admin/scrape/all', {}, { preserveScroll: true, onFinish });
     }
 }
+
+const importForm = useForm({ config: null as File | null });
+const fileInput = ref<HTMLInputElement | null>(null);
+
+function onConfigPicked(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const file = target.files?.[0] ?? null;
+    importForm.config = file;
+
+    if (file) {
+        importForm.post(importStoreAction().url, {
+            forceFormData: true,
+            preserveScroll: true,
+            onFinish: () => {
+                if (fileInput.value) {
+fileInput.value.value = '';
+}
+
+                importForm.reset('config');
+            },
+        });
+    }
+}
+
+function pickConfig() {
+    fileInput.value?.click();
+}
 </script>
 
 <template>
@@ -112,6 +148,62 @@ function confirm() {
                     pagal kiekvienos parduotuvės nustatymus.
                 </p>
             </div>
+
+            <section
+                class="rounded-2xl border border-emerald-100 bg-emerald-50/30 p-5"
+            >
+                <div class="flex items-start gap-4">
+                    <div
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-700"
+                    >
+                        <Upload :size="20" />
+                    </div>
+                    <div class="flex-1">
+                        <h2 class="text-base font-semibold text-slate-900">
+                            Importuoti parduotuvę
+                        </h2>
+                        <p class="mt-1 text-xs text-slate-600">
+                            Įkelkite uscraper formato
+                            <code class="rounded bg-white px-1 py-0.5 font-mono text-[11px] text-emerald-700">
+                                config.json
+                            </code>
+                            failą. Sukursime parduotuvės įrašą ir aktyvuosime
+                            kortelę žemiau – tada galėsite paleisti skenavimą.
+                        </p>
+                        <p
+                            v-if="importForm.errors.config"
+                            class="mt-2 text-xs font-medium text-red-600"
+                        >
+                            {{ importForm.errors.config }}
+                        </p>
+                    </div>
+                    <Button
+                        type="button"
+                        :disabled="importForm.processing"
+                        class="shrink-0 bg-emerald-600 hover:bg-emerald-700"
+                        @click="pickConfig"
+                    >
+                        <Loader2
+                            v-if="importForm.processing"
+                            :size="14"
+                            class="animate-spin"
+                        />
+                        <Upload v-else :size="14" />
+                        {{
+                            importForm.processing
+                                ? 'Įkeliama…'
+                                : 'Pasirinkti failą'
+                        }}
+                    </Button>
+                    <input
+                        ref="fileInput"
+                        type="file"
+                        accept="application/json,.json"
+                        class="hidden"
+                        @change="onConfigPicked"
+                    />
+                </div>
+            </section>
 
             <div class="grid gap-3 sm:grid-cols-2">
                 <Button

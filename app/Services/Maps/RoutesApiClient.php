@@ -9,16 +9,6 @@ use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 /**
- * Thin wrapper around Google's Routes API `computeRoutes` endpoint.
- *
- * Always sends `optimizeWaypointOrder=true` so Google solves the TSP for the
- * intermediate stops. The destination is fixed by the caller — for a
- * round-trip shopping route, pass the same coordinates as origin.
- *
- * Field mask is intentionally minimal to keep this on the cheaper Essentials
- * SKU. Adding fields like advanced lane info or traffic-aware durations would
- * push billing onto the Pro SKU.
- *
  * @phpstan-type LatLng array{lat: float, lng: float}
  * @phpstan-type RouteResult array{
  *     order: list<int>,
@@ -70,7 +60,6 @@ class RoutesApiClient
             'units' => 'METRIC',
         ];
 
-        // Walking mode does not accept routingPreference; only driving does.
         if ($mode === 'DRIVE') {
             $payload['routingPreference'] = 'TRAFFIC_AWARE';
         }
@@ -128,9 +117,6 @@ class RoutesApiClient
         ];
     }
 
-    /**
-     * Routes API returns durations as protobuf strings like "1234s".
-     */
     private static function durationToSeconds(mixed $duration): int
     {
         if (! is_string($duration)) {

@@ -98,6 +98,7 @@ function clearMarkers(): void {
     for (const m of markers.value) {
         m.setMap(null);
     }
+
     markers.value = [];
 }
 
@@ -108,6 +109,7 @@ function clearRouteLine(): void {
 
 async function renderMap(): Promise<void> {
     const m = await ensureMap();
+
     if (!m) {
         return;
     }
@@ -162,9 +164,11 @@ async function renderMap(): Promise<void> {
     });
 
     clearRouteLine();
+
     if (props.routePolyline) {
         const { encoding } = await loadMapsLibrary<typeof google.maps.geometry>('geometry');
         const path = encoding.decodePath(props.routePolyline);
+
         if (path.length > 0) {
             routeLine.value = new google.maps.Polyline({
                 path,
@@ -174,6 +178,7 @@ async function renderMap(): Promise<void> {
                 strokeOpacity: 0.85,
                 strokeWeight: 4,
             });
+
             for (const p of path) {
                 bounds.extend(p);
             }
@@ -182,6 +187,7 @@ async function renderMap(): Promise<void> {
 
     if (!bounds.isEmpty()) {
         const totalPoints = markers.value.length + (props.origin ? 1 : 0);
+
         if (totalPoints > 1) {
             m.fitBounds(bounds, 64);
         } else if (props.origin) {

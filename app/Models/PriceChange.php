@@ -7,11 +7,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-/**
- * A row exists in this table only when the price for a (store, variant) pair
- * actually changed week-over-week — not on every weekly re-confirmation. That
- * keeps the table tiny and makes "what dropped this week?" queries trivial.
- */
 class PriceChange extends Model
 {
     protected $table = 'price_changes';

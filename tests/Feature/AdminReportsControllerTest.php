@@ -12,9 +12,6 @@ function makeAdmin(): User
 }
 
 /**
- * Seed a (store, variant, snapshot, current_offer) chain for a product so the
- * admin offer-edit flow has something to operate on. Returns the snapshot id.
- *
  * @return array{snapshotId: int, storeId: int, variantId: int}
  */
 function seedOfferFor(NormalizedProduct $product, float $price = 1.99, ?float $oldPrice = 2.99, string $storeName = 'testmart', ?int $variantId = null): array
@@ -141,16 +138,36 @@ test('low-confidence products appear in ai-flagged list', function () {
         );
 });
 
-test('needs_review products appear in ai-flagged list', function () {
+test('high-confidence products with needs_review do not appear in ai-flagged list', function () {
     $admin = makeAdmin();
-    $flagged = NormalizedProduct::factory()->needsReview()->create(['ai_confidence' => 0.9]);
+    NormalizedProduct::factory()->needsReview()->create(['ai_confidence' => 0.9]);
 
     $this->actingAs($admin)
         ->get('/admin/reports')
         ->assertInertia(fn ($page) => $page
-            ->has('aiFlagged', 1)
-            ->where('aiFlagged.0.id', $flagged->id)
+            ->where('aiFlagged', [])
         );
+});
+
+test('admin update bumps ai_confidence so the product leaves the ai-flagged list', function () {
+    $admin = makeAdmin();
+    $product = NormalizedProduct::factory()->lowConfidence()->create();
+
+    $this->actingAs($admin)
+        ->patch("/admin/products/{$product->id}", [
+            'canonical_name' => 'Verified Name',
+            'brand' => 'Brand',
+            'category_id' => null,
+            'subcategory_id' => null,
+        ])
+        ->assertRedirect();
+
+    $product->refresh();
+    expect((float) $product->ai_confidence)->toBe(1.0);
+
+    $this->actingAs($admin)
+        ->get('/admin/reports')
+        ->assertInertia(fn ($page) => $page->where('aiFlagged', []));
 });
 
 test('admin can update a product and reports are cleared', function () {

@@ -9,17 +9,6 @@ use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 /**
- * Thin wrapper around Google's Places API (New) `searchText` endpoint.
- *
- * Used to discover the nearest physical store for a given retail chain by
- * biasing a text search to a circle around the user's origin. This replaces
- * the static `config/store_locations.php` lookup table — the search returns
- * authoritative Google Maps data and never goes stale.
- *
- * Field mask is intentionally minimal to keep this on the cheaper Essentials
- * SKU. The cost is per request, so callers should cache by (chain, rounded
- * origin).
- *
  * @phpstan-type LatLng array{lat: float, lng: float}
  * @phpstan-type Place array{name: string, address: string, city: string, lat: float, lng: float}
  */
@@ -36,8 +25,6 @@ class PlacesApiClient
     public function __construct(private readonly ?string $apiKey) {}
 
     /**
-     * Find the nearest store of the given chain to the supplied origin.
-     *
      * @param  LatLng  $origin
      * @return Place|null Null when the API returns zero results for that chain.
      */
@@ -98,9 +85,6 @@ class PlacesApiClient
     }
 
     /**
-     * Pull the city/locality out of the address components, falling back to
-     * an empty string when Google doesn't tag one.
-     *
      * @param  array<string, mixed>  $place
      */
     private static function extractCity(array $place): string

@@ -8,13 +8,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-/**
- * A single row scraped from a store's promo feed.
- *
- * This is a landing/audit table — it captures what the scraper saw, untouched.
- * Public reads should never go through here; they go through `current_offers`
- * (latest price per store/variant) or `offer_snapshots` (price history).
- */
 class RawOffer extends Model
 {
     protected $table = 'raw_offers';
@@ -53,8 +46,6 @@ class RawOffer extends Model
     }
 
     /**
-     * Snapshots derived from this raw row (usually exactly one).
-     *
      * @return HasMany<OfferSnapshot, self>
      */
     public function snapshots(): HasMany

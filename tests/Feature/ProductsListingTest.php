@@ -8,10 +8,6 @@ use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /**
- * Seed a full normalized fixture (store → raw offer → normalized product →
- * variant → snapshot). Returns the created snapshot id so callers can make
- * assertions about deep-linking.
- *
  * @param  array{store_name?: string, raw_external_id?: string, product_name?: string, normalized_name?: string, brand?: string|null, price?: float|null, old_price?: float|null, discount_percent?: float|null, scraped_at?: Carbon, image_url?: string|null, raw_url?: string|null, valid_from?: string|null, valid_to?: string|null, unit_value?: float|null, unit_unit?: string|null, loyalty?: bool}  $attributes
  */
 function seedSnapshot(array $attributes = []): int

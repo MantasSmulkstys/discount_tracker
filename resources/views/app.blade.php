@@ -4,7 +4,6 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
-        {{-- Apply dark class only when user has explicitly opted in. "System" still follows the OS. --}}
         <script>
             (function() {
                 const appearance = '{{ $appearance ?? "light" }}';
@@ -19,7 +18,6 @@
             })();
         </script>
 
-        {{-- Inline style to set the HTML background color based on our theme in app.css --}}
         <style>
             html {
                 background-color: oklch(1 0 0);

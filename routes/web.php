@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\ScrapeController;
+use App\Http\Controllers\Admin\StoreImportController;
 use App\Http\Controllers\AdminReportsController;
 use App\Http\Controllers\Auth\GoogleAuthenticatedSessionController;
 use App\Http\Controllers\CartController;
@@ -10,8 +11,6 @@ use App\Http\Controllers\RoutePlanController;
 use App\Http\Controllers\StatsController;
 use Illuminate\Support\Facades\Route;
 
-// `/` and `/products` both render the products listing — the listing IS the
-// homepage. Two URLs intentionally to keep old `/products` bookmarks working.
 Route::get('/', [ProductsController::class, 'index'])->name('home');
 Route::get('/products', [ProductsController::class, 'index'])->name('products.index');
 Route::get('/products/{id}', [ProductsController::class, 'show'])
@@ -45,6 +44,8 @@ Route::middleware(['auth', 'verified', 'admin'])->group(function () {
     Route::post('admin/scrape/run', [ScrapeController::class, 'runStore'])->name('admin.scrape.run');
     Route::post('admin/scrape/normalize', [ScrapeController::class, 'normalize'])->name('admin.scrape.normalize');
     Route::post('admin/scrape/all', [ScrapeController::class, 'runAll'])->name('admin.scrape.all');
+
+    Route::post('admin/stores/import', [StoreImportController::class, 'store'])->name('admin.stores.import');
 });
 
 require __DIR__.'/settings.php';

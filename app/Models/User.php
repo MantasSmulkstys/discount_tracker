@@ -26,9 +26,6 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     protected $appends = ['avatar'];
 
-    /**
-     * Whether this account is currently linked to a Google OAuth identity.
-     */
     public function hasGoogleLink(): bool
     {
         return filled($this->google_id);
@@ -43,8 +40,6 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
-     * Get the attributes that should be cast.
-     *
      * @return array<string, string>
      */
     protected function casts(): array

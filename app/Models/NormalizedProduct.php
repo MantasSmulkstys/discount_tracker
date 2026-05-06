@@ -12,13 +12,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
-/**
- * A stable product identity shared across stores and scrape batches.
- *
- * One `NormalizedProduct` may have multiple {@see ProductVariant}s (e.g. 500 g
- * vs. 1 kg pack) and each variant has many {@see OfferSnapshot}s, one per
- * store + week.
- */
 class NormalizedProduct extends Model
 {
     /** @use HasFactory<NormalizedProductFactory> */
@@ -50,10 +43,7 @@ class NormalizedProduct extends Model
      */
     public function scopeFlaggedForReview(Builder $query): Builder
     {
-        return $query->where(function (Builder $q): void {
-            $q->where('ai_confidence', '<', 0.7)
-                ->orWhere('needs_review', true);
-        });
+        return $query->where('ai_confidence', '<', 0.7);
     }
 
     /**
@@ -89,9 +79,6 @@ class NormalizedProduct extends Model
     }
 
     /**
-     * All offer snapshots for any of this product's variants. Use this for
-     * cross-store / cross-variant price comparisons.
-     *
      * @return HasManyThrough<OfferSnapshot, ProductVariant, self>
      */
     public function offerSnapshots(): HasManyThrough

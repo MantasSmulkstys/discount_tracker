@@ -10,23 +10,6 @@ use Illuminate\Console\Command;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Backdates `valid_to` on stale `offer_snapshots` (and parallel `current_offers`)
- * rows whose `valid_to` is NULL and whose `scraped_at` predates today.
- *
- * Use case: a store config that previously couldn't parse its single-end-date
- * format (e.g. Maxima's "Iki MM.DD") wrote NULL into `valid_to`. Once the
- * parser is fixed, future scrapes get the right date — but rows already in the
- * DB stay NULL until they age out of the 14-day freshness window. This command
- * expires them immediately so the public listing stops showing last week's
- * leaflet.
- *
- * Defaults to a dry run; pass --apply (or answer the prompt) to mutate data.
- *
- *     php artisan offers:expire-stale-null-valid-to                   # dry run
- *     php artisan offers:expire-stale-null-valid-to --store=maxima    # filter
- *     php artisan offers:expire-stale-null-valid-to --apply           # mutate
- */
 #[Signature('offers:expire-stale-null-valid-to {--store= : Limit to a single store slug} {--apply : Persist the change (default is dry-run)}')]
 #[Description('Backdate valid_to on stale snapshots whose flyer date never got parsed.')]
 class ExpireStaleNullValidTo extends Command
@@ -96,7 +79,6 @@ class ExpireStaleNullValidTo extends Command
 
         DB::beginTransaction();
         try {
-            // offer_snapshots is append-only — only `created_at` exists, no `updated_at`.
             $snapshotsUpdated = $snapshotQuery()->update([
                 'valid_to' => $newValidTo,
             ]);
@@ -121,10 +103,6 @@ class ExpireStaleNullValidTo extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * Show up to 5 sample rows so the operator can sanity-check what's about
-     * to change before they pass --apply.
-     */
     private function showSample(Builder $query): void
     {
         $sample = (clone $query)

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Models\NormalizedProduct;
 use App\Models\OfferSnapshot;
 use App\Models\ProductReport;
+use App\Services\AdminProductPayload;
 use App\Services\KainuCatalog;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
@@ -18,16 +20,12 @@ use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-/**
- * Public product listing + detail page, backed by the normalized
- * `offer_snapshots` / `normalized_products` / `stores` schema.
- *
- * The only identifier exposed to the URL is `offer_snapshots.id` — cross-store
- * price comparisons are resolved by walking back to `normalized_product_id`.
- */
 class ProductsController extends Controller
 {
-    public function __construct(private readonly KainuCatalog $catalog) {}
+    public function __construct(
+        private readonly KainuCatalog $catalog,
+        private readonly AdminProductPayload $adminPayload,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -123,9 +121,6 @@ class ProductsController extends Controller
             ->first();
 
         if (! $row) {
-            // The user may have deep-linked to a snapshot that is no longer the
-            // latest for its (product, store). Fall back to looking it up
-            // without the "latest" restriction so the page still renders.
             $row = DB::table('offer_snapshots')
                 ->join('product_variants', 'product_variants.id', '=', 'offer_snapshots.product_variant_id')
                 ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
@@ -206,13 +201,27 @@ class ProductsController extends Controller
             ->map(fn (object $r) => $this->catalog->hydrate($r))
             ->values();
 
-        $real = $this->catalog->priceHistory((int) $row->normalized_product_id);
+        $real = $this->catalog->priceHistory(
+            (int) $row->normalized_product_id,
+            isset($row->store_db_id) ? (int) $row->store_db_id : null,
+        );
 
         $reportedIds = auth()->check()
             ? ProductReport::where('user_id', auth()->id())
                 ->pluck('normalized_product_id')
                 ->all()
             : [];
+
+        $user = auth()->user();
+        $adminEdit = null;
+        $adminCategories = null;
+        if ($user && $user->isAdmin()) {
+            $model = NormalizedProduct::find((int) $row->normalized_product_id);
+            if ($model) {
+                $adminEdit = $this->adminPayload->forProduct($model);
+                $adminCategories = $this->catalog->loadCategoryTree();
+            }
+        }
 
         return Inertia::render('kainu/Products/Show', [
             'product' => $product,
@@ -222,53 +231,113 @@ class ProductsController extends Controller
             'historyLabels' => $real['labels'],
             'historyIsReal' => $real['isReal'],
             'reportedIds' => $reportedIds,
+            'adminEdit' => $adminEdit,
+            'adminCategories' => $adminCategories,
         ]);
     }
 
     /**
-     * Return the latest offer snapshot for the given normalized product, one
-     * row per store, sorted cheapest first. Drives the "palyginimas"
-     * comparison table on the detail page.
-     *
      * @return Collection<int, array<string, mixed>>
      */
     private function latestOffersForNormalizedProduct(int $normalizedProductId): Collection
     {
+        $productIds = $this->familySiblingProductIds($normalizedProductId);
+
         $query = DB::table('offer_snapshots')
             ->join('product_variants', 'product_variants.id', '=', 'offer_snapshots.product_variant_id')
             ->join('stores', 'stores.id', '=', 'offer_snapshots.store_id')
             ->leftJoin('raw_offers', 'raw_offers.id', '=', 'offer_snapshots.raw_offer_id')
-            ->where('product_variants.normalized_product_id', $normalizedProductId)
+            ->whereIn('product_variants.normalized_product_id', $productIds)
             ->whereIn('offer_snapshots.id', OfferSnapshot::latestIdsPerProductStoreSubquery())
             ->whereNotNull('offer_snapshots.price');
 
         $this->catalog->applyFreshness($query);
 
         return $query
+            ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
             ->orderBy('offer_snapshots.price')
             ->select([
                 'offer_snapshots.id',
                 'offer_snapshots.price',
                 'offer_snapshots.old_price',
+                'offer_snapshots.condition',
+                'product_variants.normalized_product_id as variant_product_id',
+                'product_variants.size_value',
+                'product_variants.size_unit',
+                'normalized_products.canonical_name as product_name',
+                'normalized_products.image_url as product_image',
                 'stores.name as store_name',
                 'raw_offers.url as source_url',
             ])
             ->get()
             ->map(fn (object $offer): array => [
                 'id' => (int) $offer->id,
+                'productId' => (int) $offer->variant_product_id,
+                'productName' => (string) $offer->product_name,
+                'imageUrl' => $offer->product_image,
                 'store' => Str::slug((string) $offer->store_name),
                 'storeName' => Str::title((string) $offer->store_name),
                 'price' => (float) $offer->price,
                 'oldPrice' => $offer->old_price !== null ? (float) $offer->old_price : null,
+                'condition' => $offer->condition,
                 'url' => $offer->source_url,
+                'sizeLabel' => $this->formatSize($offer->size_value, $offer->size_unit),
+                'unitPriceLabel' => $this->formatUnitPrice((float) $offer->price, $offer->size_value, $offer->size_unit),
+                'isExactMatch' => (int) $offer->variant_product_id === $normalizedProductId,
             ])
             ->values();
     }
 
+    private function formatUnitPrice(float $price, mixed $sizeValue, mixed $sizeUnit): ?string
+    {
+        if ($sizeValue === null || $sizeUnit === null || $sizeUnit === '' || (float) $sizeValue <= 0) {
+            return null;
+        }
+        $perUnit = $price / (float) $sizeValue;
+
+        return number_format($perUnit, 2, ',', '').' €/'.$sizeUnit;
+    }
+
     /**
-     * Side panel: list every store together with how many current offers it
-     * has in the normalized listing.
-     *
+     * @return array<int, int>
+     */
+    private function familySiblingProductIds(int $normalizedProductId): array
+    {
+        $product = DB::table('normalized_products as np')
+            ->leftJoin('product_variants as pv', 'pv.normalized_product_id', '=', 'np.id')
+            ->where('np.id', $normalizedProductId)
+            ->select(['np.family_id', 'pv.size_unit'])
+            ->first();
+
+        if (! $product || $product->family_id === null) {
+            return [$normalizedProductId];
+        }
+
+        $q = DB::table('normalized_products as np')
+            ->join('product_variants as pv', 'pv.normalized_product_id', '=', 'np.id')
+            ->where('np.family_id', (int) $product->family_id);
+        if ($product->size_unit === null) {
+            $q->whereNull('pv.size_unit');
+        } else {
+            $q->where('pv.size_unit', $product->size_unit);
+        }
+
+        $ids = $q->distinct()->pluck('np.id')->map(fn ($v) => (int) $v)->all();
+
+        return $ids === [] ? [$normalizedProductId] : $ids;
+    }
+
+    private function formatSize(mixed $value, mixed $unit): ?string
+    {
+        if ($value === null || $unit === null || $unit === '') {
+            return null;
+        }
+        $num = rtrim(rtrim(number_format((float) $value, 3, '.', ''), '0'), '.');
+
+        return $num === '' ? null : "$num $unit";
+    }
+
+    /**
      * @return Collection<int, array<string, mixed>>
      */
     private function storesWithCounts(): Collection
