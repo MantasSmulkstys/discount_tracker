@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
 import { ArrowDownRight, ArrowUpRight, Plus, TriangleAlert } from 'lucide-vue-next';
 import { computed } from 'vue';
 import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
@@ -23,6 +23,9 @@ const props = withDefaults(defineProps<Props>(), {
     compact: false,
     reported: false,
 });
+
+const page = usePage<{ auth?: { user?: { id: number } | null } }>();
+const isAuthenticated = computed(() => !!page.props.auth?.user);
 
 const emit = defineEmits<{
     (e: 'add-to-cart', product: KainuProduct): void;
@@ -216,6 +219,7 @@ const handleReport = (event: MouseEvent) => {
                 />
             </div>
             <button
+                v-if="isAuthenticated"
                 type="button"
                 aria-label="Pridėti į krepšelį"
                 class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] bg-stone-900 text-white transition-colors hover:bg-[#15803d]"

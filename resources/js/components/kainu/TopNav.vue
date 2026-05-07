@@ -109,6 +109,7 @@ const handleLogout = () => {
 
             <nav class="hidden items-center gap-1 lg:flex">
                 <Link
+                    v-if="user"
                     :href="statsIndex().url"
                     class="inline-flex items-center gap-2 rounded-[10px] px-[14px] py-[9px] text-[14px] transition-colors"
                     :class="
@@ -164,7 +165,7 @@ const handleLogout = () => {
                         :side-offset="6"
                         class="min-w-[220px] rounded-[12px] border-kainu-border p-1"
                     >
-                        <DropdownMenuItem as-child>
+                        <DropdownMenuItem v-if="user" as-child>
                             <Link
                                 :href="statsIndex().url"
                                 class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
@@ -198,6 +199,7 @@ const handleLogout = () => {
                 </DropdownMenu>
 
                 <Link
+                    v-if="user"
                     :href="cartIndex().url"
                     aria-label="Krepšelis"
                     class="relative inline-flex h-10 items-center gap-2 rounded-[10px] px-3 text-stone-700 transition-colors hover:bg-stone-100"
@@ -214,7 +216,7 @@ const handleLogout = () => {
                     </span>
                 </Link>
 
-                <div class="mx-1 h-6 w-px bg-kainu-border" />
+                <div v-if="user" class="mx-1 h-6 w-px bg-kainu-border" />
 
                 <DropdownMenu v-if="user">
                     <DropdownMenuTrigger as-child>

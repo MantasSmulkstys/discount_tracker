@@ -18,10 +18,12 @@ Route::get('/products/{id}', [ProductsController::class, 'show'])
     ->whereNumber('id')
     ->name('products.show');
 
-Route::get('/cart', [CartController::class, 'index'])->name('cart.index');
-Route::post('/cart/route-plan', RoutePlanController::class)->name('cart.route-plan');
+Route::middleware('auth')->group(function () {
+    Route::get('/cart', [CartController::class, 'index'])->name('cart.index');
+    Route::post('/cart/route-plan', RoutePlanController::class)->name('cart.route-plan');
 
-Route::get('/statistika', StatsController::class)->name('stats.index');
+    Route::get('/statistika', StatsController::class)->name('stats.index');
+});
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/products/{normalizedProduct}/report', [ProductReportController::class, 'store'])

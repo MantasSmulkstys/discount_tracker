@@ -233,13 +233,19 @@ function clearAll() {
     router.get('/products', {}, { preserveScroll: true, replace: true });
 }
 
+const page = usePage();
+const isLoggedIn = () => !!page.props.auth?.user;
+
 function handleAdd(product: KainuProduct) {
+    if (!isLoggedIn()) {
+        router.visit('/login');
+
+        return;
+    }
+
     addToCart(product);
     openDrawer();
 }
-
-const page = usePage();
-const isLoggedIn = () => !!page.props.auth?.user;
 
 function handleToggleReport(product: KainuProduct) {
     if (!isLoggedIn()) {

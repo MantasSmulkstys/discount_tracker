@@ -16,6 +16,8 @@ beforeEach(function (): void {
     ]);
 
     Cache::flush();
+
+    $this->actingAs(\App\Models\User::factory()->create());
 });
 
 function fakePlacesAndRoutes(array $placeByChain, array $routePayload): void

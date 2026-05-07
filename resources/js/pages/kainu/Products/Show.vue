@@ -120,6 +120,12 @@ const savings = computed(() => {
 const totalPrice = computed(() => (props.product.bestPrice ?? 0) * qty.value);
 
 function handleAdd() {
+    if (!isLoggedIn()) {
+        router.visit('/login');
+
+        return;
+    }
+
     addToCart(props.product, qty.value, selectedStore.value);
     openDrawer();
 }
@@ -133,6 +139,12 @@ function decrement() {
 }
 
 function handleAltAdd(alt: KainuProduct) {
+    if (!isLoggedIn()) {
+        router.visit('/login');
+
+        return;
+    }
+
     addToCart(alt);
     openDrawer();
 }
@@ -288,7 +300,7 @@ function handleAltAdd(alt: KainuProduct) {
                     </div>
                 </div>
 
-                <div class="flex items-stretch gap-[10px]">
+                <div v-if="isLoggedIn()" class="flex items-stretch gap-[10px]">
                     <div
                         class="flex items-center overflow-hidden rounded-[10px] border border-[#e7e5e0] bg-white"
                     >
@@ -323,6 +335,14 @@ function handleAltAdd(alt: KainuProduct) {
                         Į krepšelį · {{ formatPrice(totalPrice) }}
                     </button>
                 </div>
+                <Link
+                    v-else
+                    href="/login"
+                    class="inline-flex items-center justify-center gap-2 rounded-[10px] bg-stone-900 px-6 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-[#15803d]"
+                >
+                    <ShoppingCart :size="17" />
+                    Prisijunkite, kad pridėtumėte į krepšelį
+                </Link>
 
                 <a
                     v-if="product.url"

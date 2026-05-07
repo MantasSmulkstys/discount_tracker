@@ -58,7 +58,7 @@ function seedStoreVariantSnapshot(string $storeName, string $productName, float 
 }
 
 it('renders empty-state copy when price_changes is empty', function (): void {
-    $response = $this->get(route('stats.index'));
+    $response = $this->actingAs(\App\Models\User::factory()->create())->get(route('stats.index'));
 
     $response->assertOk()->assertInertia(
         fn (Assert $page) => $page
@@ -76,7 +76,7 @@ it('returns biggest changes sorted by absolute change_pct desc', function (): vo
     seedStoreVariantSnapshot('rimi', 'Sviestas 200g', 2.50, -40.0);
     seedStoreVariantSnapshot('iki', 'Duona', 1.00, -10.0);
 
-    $response = $this->get(route('stats.index'));
+    $response = $this->actingAs(\App\Models\User::factory()->create())->get(route('stats.index'));
 
     $response->assertOk()->assertInertia(
         fn (Assert $page) => $page
@@ -96,7 +96,7 @@ it('includes price raises alongside drops, ranked by absolute change', function 
     seedStoreVariantSnapshot('rimi', 'Rise', 2.00, 30.0);
     seedStoreVariantSnapshot('iki', 'SmallRise', 1.50, 5.0);
 
-    $response = $this->get(route('stats.index'));
+    $response = $this->actingAs(\App\Models\User::factory()->create())->get(route('stats.index'));
 
     $response->assertOk()->assertInertia(
         fn (Assert $page) => $page
