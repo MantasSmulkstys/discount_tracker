@@ -16,6 +16,12 @@ class DemoResetAibe extends Command
 {
     public function handle(): int
     {
+        if (app()->environment('production')) {
+            $this->error('Refusing to run demo:reset-aibe in production.');
+
+            return self::FAILURE;
+        }
+
         $slug = 'aibe';
 
         $store = Store::where('slug', $slug)->first();

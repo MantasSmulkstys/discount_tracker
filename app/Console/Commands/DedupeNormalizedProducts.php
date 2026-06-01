@@ -10,7 +10,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-#[Signature('products:dedupe {--dry-run : Print the plan without changing data} {--by=brand-case : Cluster strategy — brand-case or content-hash}')]
+#[Signature('products:dedupe {--dry-run : Print the plan without changing data} {--by=brand-case : Cluster strategy — brand-case, content-hash, or store-product-key} {--store= : Optional store slug filter (only honoured by store-product-key)}')]
 #[Description('Merge duplicate normalized_products into a single row per cluster.')]
 class DedupeNormalizedProducts extends Command
 {
@@ -18,18 +18,21 @@ class DedupeNormalizedProducts extends Command
     {
         $dryRun = (bool) $this->option('dry-run');
         $strategy = (string) $this->option('by');
+        $storeFilter = $this->option('store');
 
-        if (! in_array($strategy, ['brand-case', 'content-hash'], true)) {
-            $this->error("Unknown --by strategy: {$strategy}. Allowed: brand-case, content-hash.");
+        if (! in_array($strategy, ['brand-case', 'content-hash', 'store-product-key'], true)) {
+            $this->error("Unknown --by strategy: {$strategy}. Allowed: brand-case, content-hash, store-product-key.");
 
             return self::FAILURE;
         }
 
-        $this->info("Strategy: {$strategy}");
+        $this->info("Strategy: {$strategy}".($storeFilter ? " store={$storeFilter}" : ''));
 
-        $clusters = $strategy === 'content-hash'
-            ? $this->loadContentHashClusters()
-            : $this->loadDuplicateClusters();
+        $clusters = match ($strategy) {
+            'content-hash' => $this->loadContentHashClusters(),
+            'store-product-key' => $this->loadStoreProductKeyClusters(is_string($storeFilter) ? $storeFilter : null),
+            default => $this->loadDuplicateClusters(),
+        };
         if ($clusters->isEmpty()) {
             $this->info('No duplicate normalized_products clusters found.');
 
@@ -131,6 +134,53 @@ class DedupeNormalizedProducts extends Command
 
         return $rows
             ->groupBy(fn ($row): string => "{$row->store_id}|{$row->content_hash}")
+            ->filter(fn (Collection $group): bool => $group->pluck('np_id')->unique()->count() > 1)
+            ->map(fn (Collection $group): array => $group
+                ->pluck('np_id')
+                ->unique()
+                ->sort()
+                ->values()
+                ->map(fn ($id): int => (int) $id)
+                ->all()
+            );
+    }
+
+    /**
+     * Cluster by (store_id, store_product_key) — the per-store stable identity
+     * the scraper now writes on every raw_offer. Picks up duplicates that
+     * `content-hash` misses because the AI relabelled the product between
+     * scrapes.
+     *
+     * @return Collection<string, array<int, int>>
+     */
+    private function loadStoreProductKeyClusters(?string $storeSlug): Collection
+    {
+        $query = DB::table('raw_offers')
+            ->join('offer_snapshots', 'offer_snapshots.raw_offer_id', '=', 'raw_offers.id')
+            ->join('product_variants', 'product_variants.id', '=', 'offer_snapshots.product_variant_id')
+            ->whereNotNull('raw_offers.store_product_key')
+            ->where('raw_offers.normalization_status', 'done')
+            ->select([
+                'raw_offers.store_id',
+                'raw_offers.store_product_key',
+                'product_variants.normalized_product_id as np_id',
+            ])
+            ->distinct();
+
+        if ($storeSlug !== null && $storeSlug !== '') {
+            $storeId = DB::table('stores')->where('slug', $storeSlug)->value('id');
+            if ($storeId === null) {
+                $this->warn("Store slug '{$storeSlug}' not found — returning no clusters.");
+
+                return collect();
+            }
+            $query->where('raw_offers.store_id', (int) $storeId);
+        }
+
+        $rows = $query->get();
+
+        return $rows
+            ->groupBy(fn ($row): string => "{$row->store_id}|{$row->store_product_key}")
             ->filter(fn (Collection $group): bool => $group->pluck('np_id')->unique()->count() > 1)
             ->map(fn (Collection $group): array => $group
                 ->pluck('np_id')

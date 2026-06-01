@@ -2,10 +2,12 @@
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeft,
+    Check,
     Download,
     Minus,
     Plus,
     Receipt,
+    Save,
     Share2,
     ShoppingBasket,
     TrendingDown,
@@ -13,12 +15,15 @@ import {
     X,
 } from 'lucide-vue-next';
 import { computed, nextTick, ref } from 'vue';
+import CartAlternativeCard from '@/components/kainu/CartAlternativeCard.vue';
+import type { Alternative } from '@/components/kainu/CartAlternativeCard.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import RoutePlanner from '@/components/kainu/RoutePlanner.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import StoreMap from '@/components/kainu/StoreMap.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
 import { discountPct, formatPrice } from '@/lib/kainu';
+import savedCarts from '@/routes/saved-carts';
 import shoppingLists from '@/routes/shopping-lists';
 import type { GoogleMapsConfig } from '@/types/kainu';
 
@@ -35,6 +40,7 @@ const {
     originalTotal,
     savings,
     storeGroups,
+    addToCart,
     increment,
     decrement,
     remove,
@@ -84,12 +90,16 @@ type RoutePlanStop = {
 type RoutePlanResult = {
     polyline: string;
     stops: RoutePlanStop[];
+    alternatives?: Alternative[];
 };
 
 const routePlan = ref<RoutePlanResult | null>(null);
 const routeOrigin = ref<LatLng | null>(null);
 const routePolyline = computed<string | null>(() => routePlan.value?.polyline ?? null);
 const routeStops = computed<RoutePlanStop[]>(() => routePlan.value?.stops ?? []);
+const alternatives = computed<Alternative[]>(
+    () => routePlan.value?.alternatives ?? [],
+);
 const hasMapsKey = computed<boolean>(() => Boolean(props.googleMaps?.apiKey));
 const planningVisible = ref(false);
 const planningSectionRef = ref<HTMLElement | null>(null);
@@ -98,12 +108,118 @@ const onRoutePlan = (plan: RoutePlanResult | null): void => {
     routePlan.value = plan;
 };
 
+const applyAlternative = (alt: Alternative): void => {
+    clear();
+    for (const item of alt.items) {
+        addToCart(
+            {
+                id: item.normalizedProductId ?? Math.random(),
+                normalizedProductId: item.normalizedProductId ?? 0,
+                familyId: item.familyId,
+                name: item.name,
+                normalizedName: null,
+                brand: null,
+                category: 'all',
+                unit: null,
+                emoji: '',
+                bestPrice: item.priceCents / 100,
+                oldPrice: null,
+                discount: null,
+                condition: null,
+                bestStore: item.storeSlug,
+                bestStoreName: item.storeSlug,
+                image: null,
+                url: null,
+                validDates: null,
+                validFrom: null,
+                validTo: null,
+                loyaltyCard: false,
+                scrapedAt: null,
+            },
+            item.quantity,
+            item.storeSlug,
+        );
+    }
+};
+
 const onRouteOrigin = (next: LatLng | null): void => {
     routeOrigin.value = next;
 };
 
 const page = usePage();
 const isLoggedIn = (): boolean => Boolean(page.props.auth?.user);
+
+const isSaving = ref(false);
+const savePromptOpen = ref(false);
+const newListName = ref('');
+const saveError = ref<string | null>(null);
+
+const defaultListName = (): string => {
+    const today = new Date().toLocaleDateString('lt-LT', {
+        month: 'long',
+        day: 'numeric',
+    });
+
+    return `Sąrašas (${today})`;
+};
+
+const openSavePrompt = (): void => {
+    if (items.value.length === 0) {
+        return;
+    }
+    newListName.value = defaultListName();
+    saveError.value = null;
+    savePromptOpen.value = true;
+};
+
+const closeSavePrompt = (): void => {
+    savePromptOpen.value = false;
+    newListName.value = '';
+    saveError.value = null;
+};
+
+const submitSave = (): void => {
+    const name = newListName.value.trim();
+    if (name === '') {
+        saveError.value = 'Įveskite sąrašo pavadinimą.';
+
+        return;
+    }
+
+    isSaving.value = true;
+
+    const payload = {
+        name,
+        items: items.value.map((i) => ({
+            familyId: i.product.familyId ?? null,
+            normalizedProductId: i.product.normalizedProductId ?? null,
+            variantId: null,
+            quantity: i.qty,
+            name: i.product.name,
+            storeSlug: i.storeId ?? null,
+            priceCents:
+                i.product.bestPrice !== null
+                    ? Math.round(i.product.bestPrice * 100)
+                    : null,
+        })),
+    };
+
+    router.post(savedCarts.store().url, payload, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => {
+            closeSavePrompt();
+        },
+        onError: (errors) => {
+            saveError.value =
+                (Object.values(errors)[0] as string | undefined) ??
+                'Nepavyko išsaugoti.';
+        },
+        onFinish: () => {
+            isSaving.value = false;
+        },
+    });
+};
 
 const generateShoppingPlan = async (): Promise<void> => {
     if (items.value.length === 0) {
@@ -178,6 +294,16 @@ const generateShoppingPlan = async (): Promise<void> => {
                     v-if="items.length > 0"
                     class="flex flex-wrap items-center gap-2"
                 >
+                    <button
+                        v-if="isLoggedIn()"
+                        type="button"
+                        :disabled="isSaving"
+                        class="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-brand-700 px-3 text-[12px] font-semibold text-white transition-colors hover:bg-brand-800 disabled:cursor-wait disabled:opacity-60"
+                        @click="openSavePrompt"
+                    >
+                        <Save :size="14" :stroke-width="2" />
+                        Išsaugoti sąrašą
+                    </button>
                     <button
                         type="button"
                         class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-kainu-border bg-white px-3 text-[12px] font-medium text-stone-700 transition-colors hover:bg-kainu-surface"
@@ -424,11 +550,53 @@ const generateShoppingPlan = async (): Promise<void> => {
                     <div class="flex flex-col gap-4">
                         <RoutePlanner
                             :chains="highlightChains"
+                            :items="
+                                items.map((i) => ({
+                                    familyId: i.product.familyId ?? null,
+                                    normalizedProductId:
+                                        i.product.normalizedProductId,
+                                    variantId: null,
+                                    quantity: i.qty,
+                                    storeSlug: i.storeId,
+                                    priceCents:
+                                        i.product.bestPrice !== null
+                                            ? Math.round(
+                                                  i.product.bestPrice * 100,
+                                              )
+                                            : null,
+                                }))
+                            "
                             :has-maps-key="hasMapsKey"
                             :api-key="googleMaps.apiKey ?? null"
                             @plan="onRoutePlan"
                             @origin="onRouteOrigin"
                         />
+
+                        <section
+                            v-if="alternatives.length > 0"
+                            class="rounded-[14px] border border-kainu-border bg-kainu-surface p-4"
+                        >
+                            <h3
+                                class="m-0 mb-2 text-[14px] font-semibold tracking-tight text-stone-900"
+                            >
+                                Alternatyvūs krepšeliai
+                            </h3>
+                            <p class="m-0 mb-3 text-[12px] text-stone-500">
+                                Pasiūlymai, kurie gali būti pigesni arba
+                                greitesni už dabartinį krepšelį.
+                            </p>
+                            <div
+                                class="flex gap-3 overflow-x-auto pb-2"
+                            >
+                                <CartAlternativeCard
+                                    v-for="(alt, idx) in alternatives"
+                                    :key="alt.label + idx"
+                                    :alternative="alt"
+                                    @apply="applyAlternative"
+                                />
+                            </div>
+                        </section>
+
                         <StoreMap
                             :config="googleMaps"
                             :origin="routeOrigin"
@@ -494,4 +662,69 @@ const generateShoppingPlan = async (): Promise<void> => {
             </aside>
         </div>
     </div>
+
+    <Teleport to="body">
+        <div
+            v-if="savePromptOpen"
+            class="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/40 px-4"
+            @click.self="closeSavePrompt"
+        >
+            <div
+                class="w-full max-w-md overflow-hidden rounded-[16px] bg-white shadow-2xl"
+                role="dialog"
+                aria-label="Išsaugoti sąrašą"
+            >
+                <div class="border-b border-kainu-border px-5 py-4">
+                    <h3 class="m-0 text-[16px] font-bold tracking-tight text-stone-900">
+                        Išsaugoti sąrašą
+                    </h3>
+                    <p class="mt-1 text-[12px] text-stone-500">
+                        Sąrašą galėsite vėliau atkurti į krepšelį iš
+                        „Mano sąrašai“ skilties.
+                    </p>
+                </div>
+                <div class="flex flex-col gap-3 px-5 py-4">
+                    <label
+                        for="cart-save-list-name"
+                        class="text-[11px] font-semibold tracking-[0.04em] text-stone-500 uppercase"
+                    >
+                        Sąrašo pavadinimas
+                    </label>
+                    <input
+                        id="cart-save-list-name"
+                        v-model="newListName"
+                        type="text"
+                        maxlength="120"
+                        autocomplete="off"
+                        placeholder="Pvz. Savaitės pirkiniai"
+                        class="rounded-[10px] border border-kainu-border bg-white px-3 py-2 text-[14px] text-stone-900 placeholder:text-stone-400 focus:border-stone-300 focus:outline-none"
+                        @keyup.enter="submitSave"
+                    />
+                    <p v-if="saveError" class="m-0 text-[12px] text-red-600">
+                        {{ saveError }}
+                    </p>
+                </div>
+                <div
+                    class="flex items-center justify-end gap-2 border-t border-kainu-border bg-kainu-surface px-5 py-3"
+                >
+                    <button
+                        type="button"
+                        class="inline-flex h-9 items-center rounded-[10px] border border-kainu-border bg-white px-3 text-[13px] font-medium text-stone-700 hover:bg-stone-50"
+                        @click="closeSavePrompt"
+                    >
+                        Atšaukti
+                    </button>
+                    <button
+                        type="button"
+                        :disabled="isSaving"
+                        class="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-brand-700 px-3 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-wait disabled:opacity-60"
+                        @click="submitSave"
+                    >
+                        <Check :size="14" :stroke-width="2" />
+                        Išsaugoti
+                    </button>
+                </div>
+            </div>
+        </div>
+    </Teleport>
 </template>

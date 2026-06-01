@@ -33,6 +33,36 @@ type Stop = {
     distanceFromPreviousMeters: number;
 };
 
+type CartItemPayload = {
+    familyId: number | null;
+    normalizedProductId: number | null;
+    variantId: number | null;
+    quantity: number;
+    storeSlug: string | null;
+    priceCents: number | null;
+};
+
+type AlternativeItem = {
+    familyId: number | null;
+    normalizedProductId: number | null;
+    variantId: number | null;
+    storeSlug: string;
+    priceCents: number;
+    quantity: number;
+    name: string;
+    fixed: boolean;
+};
+
+type Alternative = {
+    label: string;
+    stores: string[];
+    totalPriceCents: number;
+    totalDurationSec: number;
+    priceDeltaCents: number;
+    durationDeltaSec: number;
+    items: AlternativeItem[];
+};
+
 type RoutePlan = {
     mode: TravelMode;
     stops: Stop[];
@@ -40,12 +70,14 @@ type RoutePlan = {
     polyline: string;
     totalDurationSec: number;
     totalDistanceMeters: number;
+    alternatives?: Alternative[];
 };
 
 const props = defineProps<{
     chains: string[];
     hasMapsKey: boolean;
     apiKey: string | null;
+    items?: CartItemPayload[];
 }>();
 
 const emit = defineEmits<{
@@ -68,12 +100,14 @@ type RoutePlanForm = {
     origin: LatLng;
     chains: string[];
     mode: TravelMode;
+    items: CartItemPayload[];
 };
 
 const planForm = useHttp<RoutePlanForm, RoutePlan>({
     origin: { lat: 0, lng: 0 },
     chains: [],
     mode: 'driving',
+    items: [],
 });
 
 const formatDuration = (sec: number): string => {
@@ -152,6 +186,7 @@ const fetchPlan = async (
     planForm.origin = coord;
     planForm.chains = [...props.chains];
     planForm.mode = travelMode;
+    planForm.items = props.items ?? [];
 
     try {
         const data = await planForm.submit(RoutePlanController());

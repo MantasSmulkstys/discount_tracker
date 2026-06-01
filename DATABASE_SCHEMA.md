@@ -1,351 +1,397 @@
-# Discount Tracker Database Schema
+# Database schema — Discount Tracker
 
-This document describes the database schema for the Discount Tracker application.
+The database is shared by two processes: the **Python scraper** (`uscraper/`) writes raw offers and the **Laravel web app** (`discounttracker/`) reads from the normalized side and orchestrates the normalization pipeline.
 
-## Overview
+Production uses **PostgreSQL 15+**. Tests run on **SQLite `:memory:`**.
 
-The database consists of 6 core tables that support the scraping, normalization, and price tracking workflow:
+---
 
-1. **stores** - Retail chains (e.g., Maxima, Lidl, Rimi)
-2. **scrape_batches** - Individual scraper runs
-3. **raw_offers** - Raw scraped product offers
-4. **normalized_products** - Normalized product identities
-5. **product_variants** - Product variants (sizes, packages)
-6. **offer_snapshots** - Price history snapshots
+## Domains
 
-## Data Flow
+Tables group cleanly into four domains:
+
+| Domain | Tables |
+|---|---|
+| **Taxonomy** | `categories`, `subcategories` |
+| **Catalog** | `stores`, `product_families`, `normalized_products`, `product_variants` |
+| **Pricing & history** | `scrape_batches`, `raw_offers`, `offer_snapshots`, `current_offers`, `price_changes` |
+| **Users & engagement** | `users`, `product_reports`, `shopping_lists`, `saved_carts`, `saved_cart_items`, `family_subscriptions`, `notification_log` |
+
+Framework tables (`cache`, `jobs`, `sessions`, `failed_jobs`, etc.) are managed by Laravel and not documented here.
+
+---
+
+## Data flow
 
 ```
-stores
-  -> scrape_batches
-  -> raw_offers
-  -> normalized_products
-  -> product_variants
-  -> offer_snapshots
+              ┌─────────────────────────────────┐
+              │  Python scraper (uscraper/)     │
+              └────────────────┬────────────────┘
+                               ▼
+                          scrape_batches
+                               │
+                          (one per store-week, idempotent)
+                               ▼
+                          raw_offers
+                               │
+                          (normalization_status: pending → processing → done | failed)
+                               ▼
+              ┌─────────────────────────────────┐
+              │  Python normalizer              │
+              │  (process_raw_offers_normalized)│
+              └────────────────┬────────────────┘
+                               │ AI + deterministic fallback
+                               ▼
+          product_families ── normalized_products ── product_variants
+                                                          │
+                                                          ▼
+                                                   offer_snapshots  (price history, append-only)
+                                                          │
+                                              ┌───────────┴───────────┐
+                                              ▼                       ▼
+                                       current_offers           price_changes
+                                       (latest per             (delta rows for
+                                        variant×store)          /statistika)
 ```
 
-## Tables
+The Laravel read path joins through `offer_snapshots` filtered to `OfferSnapshot::latestIdsPerProductStoreSubquery()` and applies a 14-day freshness window. `current_offers` exists for cart and saved-list lookups where freshness can be relaxed.
 
-### 1. stores
+---
 
-Stores retail chain information.
+## Taxonomy
 
-| Column | Type | Nullable | Description |
-|--------|------|----------|-------------|
-| id | bigint | No | Primary key |
-| name | string | No | Store name (unique) |
-| slug | string | No | URL-friendly identifier (unique) |
-| website_url | text | Yes | Store website URL |
-| is_active | boolean | No | Whether store is active (default: true) |
-| created_at | timestamp | No | Creation timestamp |
-| updated_at | timestamp | No | Update timestamp |
+### `categories`
+Top-level grocery categories (Lithuanian).
 
-**Example stores:** lidl, maxima, rimi, iki, norfa
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `name_lt` | text | No | Unique. Lithuanian display name. |
+| `slug` | text | No | Unique. URL-safe identifier. |
 
-### 2. scrape_batches
+### `subcategories`
 
-Tracks each scraper run.
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `category_id` | foreign | No | `categories.id`, cascade. |
+| `name_lt` | text | No | |
+| `slug` | text | No | |
 
-| Column | Type | Nullable | Description |
-|--------|------|----------|-------------|
-| id | bigint | No | Primary key |
-| store_id | foreign id | Yes | Foreign key to stores (null on delete) |
-| source_name | text | No | Name of the scraper source |
-| notes | text | Yes | Additional notes about the batch |
-| started_at | timestamp | No | When scrape started (default: current timestamp) |
-| finished_at | timestamp | Yes | When scrape finished |
-| status | enum | No | Status: running, completed, failed (default: running) |
-| offers_found | integer | No | Number of offers found (default: 0) |
-| offers_inserted | integer | No | Number of offers inserted (default: 0) |
-| offers_updated | integer | No | Number of offers updated (default: 0) |
-| offers_failed | integer | No | Number of offers failed (default: 0) |
-| error_message | text | Yes | Error message if failed |
-| created_at | timestamp | No | Creation timestamp |
-| updated_at | timestamp | No | Update timestamp |
+Unique on `(category_id, name_lt)` and `(category_id, slug)`.
 
-**Indexes:** store_id, source_name, status, started_at
+---
 
-### 3. raw_offers
+## Catalog
 
-Stores raw scraped product offers before normalization.
+### `stores`
+The supermarket chains we track.
 
-| Column | Type | Nullable | Description |
-|--------|------|----------|-------------|
-| id | bigint | No | Primary key |
-| store_id | foreign id | No | Foreign key to stores (cascade on delete) |
-| scrape_batch_id | foreign id | Yes | Foreign key to scrape_batches (null on delete) |
-| external_id | string(64) | Yes | Store's product identifier |
-| name | text | No | Product name |
-| price | decimal(10,2) | Yes | Current price |
-| old_price | decimal(10,2) | Yes | Original price |
-| discount | string | Yes | Discount percentage or text |
-| condition | text | Yes | Product condition |
-| unit_price | string | Yes | Unit price string |
-| image | text | Yes | Image URL |
-| url | text | Yes | Product URL |
-| valid_dates | text | Yes | Validity dates as text |
-| valid_from | date | Yes | Validity start date |
-| valid_to | date | Yes | Validity end date |
-| loyalty_card | boolean | No | Requires loyalty card (default: false) |
-| scraped_at | timestamp | Yes | When offer was scraped |
-| normalization_status | string | Yes | Status: pending, processing, done, failed |
-| normalized_product_id | foreign id | Yes | Foreign key to normalized_products (null on delete) |
-| product_variant_id | foreign id | Yes | Foreign key to product_variants (null on delete) |
-| normalized_at | timestamp | Yes | When normalization completed |
-| normalization_error | text | Yes | Normalization error message |
-| raw_payload | jsonb | Yes | Original raw data from scraper |
-| created_at | timestamp | No | Creation timestamp |
-| updated_at | timestamp | No | Update timestamp |
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `name` | string | No | Unique. Lowercase machine name (e.g. `maxima`). UI capitalises via `Str::title()`. |
+| `slug` | string | No | Unique. Same value as `name` for now; kept separate to allow future renames. |
+| `website_url` | text | Yes | |
+| `is_active` | bool | No | Default `true`. |
+| `scrape_cron` | string | Yes | Optional per-store cron expression (e.g. `'0 6 * * 1'`). Read by `routes/console.php`. |
+| `logo_path` | string | Yes | Relative path under `public/`, e.g. `/store-logos/maxima.png`. |
+| `created_at` / `updated_at` | timestamp | No | |
 
-**Indexes:** store_id, scrape_batch_id, normalization_status, normalized_product_id, product_variant_id, scraped_at, external_id, name
+### `product_families`
+Cross-store match key. Many `normalized_products` (one per phrasing) can share one family.
 
-### 4. normalized_products
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `family_name` | string | Yes | Human-friendly display. |
+| `normalized_family_name` | string | No | Unique. ASCII-only, diacritic-stripped key from `normalization/ai_normalize.normalize_identity_text()`. |
+| `category_id` | foreign | Yes | `categories.id`, nullable. |
+| `subcategory_id` | foreign | Yes | `subcategories.id`, nullable. |
+| `generic_name` | string | Yes | Older AI output style; kept for back-compat. |
+| `created_at` / `updated_at` | timestamp | No | |
 
-Stores logical product identities (e.g., "Pienas", "Varškė", "Bananai").
+### `normalized_products`
+The canonical product identity. One row per distinct `(normalized_name, brand, category_id, subcategory_id)` tuple, enforced by a generated `identity_key` unique index.
 
-| Column | Type | Nullable | Description |
-|--------|------|----------|-------------|
-| id | bigint | No | Primary key |
-| canonical_name | text | No | Canonical product name |
-| normalized_name | text | No | Normalized name for search/deduplication |
-| brand | string | Yes | Product brand |
-| generic_name | string | Yes | Generic product name |
-| category | string | Yes | Product category |
-| subcategory | string | Yes | Product subcategory |
-| ai_confidence | decimal(5,4) | Yes | AI confidence score |
-| needs_review | boolean | No | Whether product needs review (default: false) |
-| normalization_version | string | Yes | Normalization version |
-| source_name | text | Yes | Source of normalization |
-| image_url | text | Yes | Product image URL |
-| created_at | timestamp | No | Creation timestamp |
-| updated_at | timestamp | No | Update timestamp |
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `canonical_name` | text | No | UI display name (e.g. *"Pienas 2,5% Rokiškio"*). |
+| `normalized_name` | text | No | ASCII-collapsed lowercase form. Driven by the AI. |
+| `brand` | string | Yes | Lowercase brand (case-insensitive in `identity_key`). |
+| `generic_name` | string | Yes | Plain product type (e.g. *"pienas"*). |
+| `category_id` | foreign | Yes | |
+| `subcategory_id` | foreign | Yes | |
+| `family_id` | foreign | Yes | `product_families.id`. |
+| `ai_confidence` | decimal(5,4) | Yes | `< REVIEW_CONFIDENCE_THRESHOLD` (0.7) flips review queue inclusion. |
+| `needs_review` | bool | No | Default `false`. |
+| `normalization_version` | string | Yes | e.g. `ai_v1`, `deterministic_v1`, `cached_by_content_hash`. |
+| `source_name` | text | Yes | Raw scraped name kept as origin trace. |
+| `image_url` | text | Yes | First non-placeholder image we saw. |
+| `identity_key` | generated text | No | `normalized_name | brand | category_id | subcategory_id`, NULL-safe via `COALESCE`. UNIQUE. |
+| `created_at` / `updated_at` | timestamp | No | |
 
-**Indexes:** normalized_name, canonical_name, brand, needs_review
+### `product_variants`
+A specific size/package variant of a normalized product. One row per `(normalized_product_id, size_value, size_unit, package_count, package_unit)`.
 
-### 5. product_variants
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `normalized_product_id` | foreign | No | Cascade on delete. |
+| `variant_name` | text | Yes | Display label, e.g. *"1 l"*. |
+| `size_value` / `size_unit` | decimal(10,3) / string(16) | Yes | e.g. `1.000` / `l`. |
+| `package_count` / `package_unit` | decimal(10,3) / string(16) | Yes | e.g. `10` / `vnt`. |
+| `net_quantity_value` / `net_quantity_unit` | decimal(10,3) / string(16) | Yes | Independent of size; used when AI reports a separate "net" value. |
+| `attributes` | jsonb | Yes | Free-form AI-extracted attributes. |
+| `identity_key` | generated text | No | UNIQUE. |
+| `created_at` / `updated_at` | timestamp | No | |
 
-Stores concrete product variants (e.g., "500 g", "1 l", "2 pcs").
+---
 
-| Column | Type | Nullable | Description |
-|--------|------|----------|-------------|
-| id | bigint | No | Primary key |
-| normalized_product_id | foreign id | No | Foreign key to normalized_products (cascade on delete) |
-| variant_name | text | Yes | Variant name/description |
-| size_value | decimal(10,3) | Yes | Size value |
-| size_unit | string | Yes | Size unit (e.g., g, ml, l, kg) |
-| package_count | decimal(10,3) | Yes | Package count |
-| package_unit | string | Yes | Package unit (e.g., pcs, units) |
-| net_quantity_value | decimal(10,3) | Yes | Net quantity value |
-| net_quantity_unit | string | Yes | Net quantity unit |
-| attributes | jsonb | Yes | Additional attributes |
-| created_at | timestamp | No | Creation timestamp |
-| updated_at | timestamp | No | Update timestamp |
+## Pricing & history
 
-**Indexes:** normalized_product_id, size_value, size_unit, package_count, package_unit
+### `scrape_batches`
+One row per `(store_id, week_starting)`. Re-running mid-week reuses the row.
 
-### 6. offer_snapshots
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `store_id` | foreign | Yes | `nullOnDelete`. |
+| `source_name` | text | No | e.g. `iki`, `multi_store_scrape`, `demo:price-changes`. |
+| `notes` | text | Yes | |
+| `week_starting` | date | Yes | Monday of ISO week. Unique with `store_id`. |
+| `started_at` | timestamp | No | |
+| `finished_at` | timestamp | Yes | |
+| `status` | string(16) | No | Default `running`. Enum (Postgres CHECK): `running`, `completed`, `failed`. |
+| `offers_found` / `_inserted` / `_updated` / `_failed` | int | No | Default 0. Telemetry. |
+| `error_message` | text | Yes | |
+| `created_at` / `updated_at` | timestamp | No | |
 
-The most important table for price history tracking. Each row represents one observed price for one product variant in one store at one scrape time.
+### `raw_offers`
+Every scraped product card before normalization.
 
-| Column | Type | Nullable | Description |
-|--------|------|----------|-------------|
-| id | bigint | No | Primary key |
-| raw_offer_id | foreign id | Yes | Foreign key to raw_offers (null on delete) |
-| product_variant_id | foreign id | No | Foreign key to product_variants (cascade on delete) |
-| store_id | foreign id | No | Foreign key to stores (cascade on delete) |
-| scrape_batch_id | foreign id | Yes | Foreign key to scrape_batches (null on delete) |
-| price | decimal(10,2) | No | Current price |
-| old_price | decimal(10,2) | Yes | Original price |
-| discount_percent | decimal(5,2) | Yes | Discount percentage |
-| loyalty_card | boolean | No | Requires loyalty card (default: false) |
-| unit_price_value | decimal(10,3) | Yes | Unit price value |
-| unit_price_unit | string | Yes | Unit price unit |
-| valid_from | date | Yes | Offer valid from |
-| valid_to | date | Yes | Offer valid to |
-| scraped_at | timestamp | No | When snapshot was created |
-| is_promotion | boolean | No | Whether this is a promotion (default: false) |
-| created_at | timestamp | No | Creation timestamp |
-| updated_at | timestamp | Yes | Update timestamp |
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `store_id` | foreign | No | Cascade. |
+| `scrape_batch_id` | foreign | Yes | `nullOnDelete`. |
+| `content_hash` | string(64) | Yes | SHA-256 of `(store, name, url, unit_price, condition)`. Unique with `scrape_batch_id`. |
+| `external_sku` | string(128) | Yes | Reserved; not currently populated. |
+| `store_product_key` | text | Yes | Per-store stable identity. URL > image > text fingerprint. |
+| `key_source` | string(16) | Yes | CHECK: `url` / `image` / `text`. |
+| `name` | text | No | Raw scraped name. |
+| `price` / `old_price` / `discount` | decimal / decimal / string | Yes | `discount` is the raw text from the card (e.g. `-40%`). |
+| `condition` | text | Yes | e.g. *"1+1"*, *"Perkant 2 ar daugiau"*. |
+| `unit_price` / `unit_price_value` / `unit_price_unit` | string / decimal / string(16) | Yes | Raw string + parsed numeric form. |
+| `image` / `url` | text | Yes | |
+| `valid_dates` / `valid_from` / `valid_to` | text / date / date | Yes | Raw string + parsed boundaries. |
+| `loyalty_card` | bool | No | Default false. |
+| `scraped_at` | timestamp | Yes | |
+| `normalization_status` | string(16) | Yes | Enum: `pending`, `processing`, `done`, `failed`. NULL means "not yet picked up". |
+| `normalization_error` | text | Yes | |
+| `normalized_at` | timestamp | Yes | |
+| `raw_payload` | jsonb | Yes | Reserved; not currently populated. |
+| `created_at` / `updated_at` | timestamp | No | |
 
-**Indexes:** product_variant_id, store_id, scrape_batch_id, raw_offer_id, scraped_at, valid_from, valid_to, price, is_promotion
+**`normalization_status` state machine**
 
-## Running Migrations
+```
+NULL ──► pending ──► processing ──► done
+                          │
+                          └──────► failed
+                          │
+                          └──── (stale recovery, _recover_stale_rows) ──► pending
+```
 
-### Fresh Installation
+`failed` rows are reset to `pending` only with `--retry-failed` since some failures are deterministic.
 
-To create all tables from scratch:
+### `offer_snapshots`
+Append-only price log. One row per `(product_variant_id, store_id, week_starting)`, enforced by `offer_snapshots_pvs_week_unique`.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `raw_offer_id` | foreign | Yes | `nullOnDelete`. |
+| `product_variant_id` | foreign | No | Cascade. |
+| `store_id` | foreign | No | Cascade. |
+| `scrape_batch_id` | foreign | Yes | |
+| `week_starting` | date | No | Monday of ISO week. |
+| `price` / `old_price` / `discount_percent` | decimal | Yes | |
+| `condition` | text | Yes | |
+| `loyalty_card` | bool | No | |
+| `unit_price_value` / `unit_price_unit` | decimal / string | Yes | |
+| `valid_from` / `valid_to` | date | Yes | |
+| `scraped_at` | timestamp | No | |
+| `is_promotion` | bool | No | Default false. Set true when `old_price` or `discount_percent` or `condition` present. |
+| `created_at` | timestamp | No | No `updated_at` — append-only. |
+
+### `current_offers`
+Materialised "latest snapshot per `(store, variant)`". Composite PK rather than synthetic id.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `store_id` | foreign | No | Part of PK. Cascade. |
+| `product_variant_id` | foreign | No | Part of PK. Cascade. |
+| `price` / `old_price` / `discount_percent` | decimal | Yes | |
+| `condition` | text | Yes | |
+| `is_promotion` / `loyalty_card` | bool | No | |
+| `unit_price_value` / `unit_price_unit` | decimal / string | Yes | |
+| `valid_from` / `valid_to` | date | Yes | |
+| `last_seen_at` | timestamp | No | |
+| `week_starting` | date | No | |
+| `last_snapshot_id` | foreign | Yes | `offer_snapshots.id`, `nullOnDelete`. |
+| `updated_at` | timestamp | No | |
+
+Partial index `current_offers_promotion_idx` on `is_promotion` WHERE `is_promotion = true`.
+
+### `price_changes`
+Cross-week price deltas for `/statistika`.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | PK |
+| `product_variant_id` | foreign | No | Cascade. |
+| `store_id` | foreign | No | Cascade. |
+| `previous_price` / `new_price` | decimal | Yes / No | |
+| `change_pct` | decimal(6,2) | Yes | Signed percentage. |
+| `week_starting` | date | No | |
+| `changed_at` | timestamp | No | |
+| `snapshot_id` | foreign | Yes | `offer_snapshots.id`, `nullOnDelete`. |
+
+Partial index `price_changes_big_drops_idx` on `changed_at` WHERE `change_pct < -10`.
+
+---
+
+## Users & engagement
+
+### `users`
+Laravel default + Fortify 2FA + Socialite Google link.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| `id` | bigint | No | |
+| `name` / `email` | string | No | |
+| `email_verified_at` | timestamp | Yes | |
+| `password` | string | No | Hashed by Fortify. |
+| `two_factor_secret` / `two_factor_recovery_codes` / `two_factor_confirmed_at` | text/text/timestamp | Yes | Fortify 2FA. |
+| `role` | string | No | `UserRole` enum: `user` / `admin`. |
+| `google_id` / `google_avatar` | string / text | Yes | Set by `ResolveGoogleUser`. |
+| `remember_token` | string | Yes | |
+| `created_at` / `updated_at` | timestamp | No | |
+
+### `product_reports`
+User flags a product as miscategorised. Unique on `(user_id, normalized_product_id)`.
+
+### `shopping_lists`
+Sliding-window record of a completed cart checkout. Used by `/statistika` personal panel.
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | foreign | Cascade. |
+| `item_count` | int | |
+| `subtotal` / `original_total` / `savings` | decimal(10,2) | |
+| `items` / `store_ids` | json | Snapshot of the cart at submit time. |
+
+### `saved_carts` + `saved_cart_items`
+Persistent named carts (different from `shopping_lists` which is a check-out log).
+
+`saved_cart_items` joins `product_families`, `normalized_products`, `product_variants` — all nullable to survive upstream deletions. Snapshot columns (`snapshot_name`, `snapshot_store_slug`, `snapshot_price_cents`) preserve the cart row's display even if the source product disappears.
+
+### `family_subscriptions`
+"Notify me when this product becomes cheaper". Unique on `(user_id, family_id, store_id)`.
+
+### `notification_log`
+Idempotency record so `SendPriceAlertsJob` doesn't double-send.
+
+| Column | Notes |
+|---|---|
+| `user_id`, `family_id`, `store_id`, `current_offer_snapshot_id` | Foreign keys; cascade except `store_id` and `current_offer_snapshot_id` which `nullOnDelete`. |
+| `trigger_type` | string(16) — `new` / `price_drop` / `reappearance`. |
+| `sent_at` | timestamp. |
+
+---
+
+## Generated columns
+
+Both `normalized_products.identity_key` and `product_variants.identity_key` are generated columns:
+
+- **PostgreSQL**: `STORED` generated column from `normalized_name || '|' || COALESCE(brand,'') || ...`
+- **SQLite**: `VIRTUAL` generated column with the same expression — SQLite forbids `STORED` via `ALTER TABLE`, but a UNIQUE index on a VIRTUAL column materialises the same guarantee.
+
+The point is **NULL-safe uniqueness**. A plain `UNIQUE (normalized_name, brand, category_id, subcategory_id)` treats NULL values as distinct, so two rows with the same name but `NULL` brand would coexist and the dedup would miss them.
+
+---
+
+## Idempotency invariants
+
+1. **`scrape_batches` UNIQUE on `(store_id, week_starting)`** — re-running mid-week reuses the batch.
+2. **`raw_offers` UNIQUE on `(scrape_batch_id, content_hash)`** — same product scraped twice updates the existing row.
+3. **`offer_snapshots` UNIQUE on `(product_variant_id, store_id, week_starting)`** — re-normalizing is a no-op.
+4. **`current_offers` PK is `(store_id, product_variant_id)`** — guaranteed singleton.
+5. **`family_subscriptions` UNIQUE on `(user_id, family_id, store_id)`** — `firstOrCreate` enforces it.
+6. **`normalized_products.identity_key`** + **`product_variants.identity_key`** UNIQUE — every upsert is `ON CONFLICT DO UPDATE`.
+
+---
+
+## Indexes worth knowing
+
+| Table | Index | Used by |
+|---|---|---|
+| `raw_offers` | `(store_id, store_product_key)` | Normalizer dedup shortcut (preferred). |
+| `raw_offers` | `content_hash` | Normalizer dedup fallback. |
+| `raw_offers` | `normalization_status` | Candidate selection loop. |
+| `offer_snapshots` | `(product_variant_id, scraped_at)` | Price history charts. |
+| `offer_snapshots` | `(store_id, scraped_at)` | Per-store views. |
+| `offer_snapshots` | `(week_starting, is_promotion)` partial | Promo dashboards. |
+| `current_offers` | `(product_variant_id, price)` | Cross-store cheapest lookup. |
+| `current_offers` | `is_promotion` partial | Active promo listings. |
+| `price_changes` | `(change_pct < -10)` partial | Big-drop stats. |
+
+---
+
+## Running migrations
 
 ```bash
-php artisan migrate:fresh
-```
+# Fresh DB
+php artisan migrate:fresh --seed
 
-### Incremental Updates
-
-To run pending migrations:
-
-```bash
+# Incremental
 php artisan migrate
+
+# Check what would run
+php artisan migrate:status
 ```
 
-### Verify Schema
-
-To verify all required tables and columns exist:
+To regenerate this document from the live schema:
 
 ```bash
-php artisan db:verify-schema
+php artisan schema:dump --database=pgsql
 ```
 
-## SQL Queries for Manual Verification
+---
 
-### List All Tables
+## Eloquent models
 
-```sql
-SELECT table_name
-FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;
-```
+All models live under `app/Models/`. The model class structure mirrors the schema:
 
-### List All Columns for Core Tables
-
-```sql
-SELECT table_name, column_name, data_type, is_nullable, column_default
-FROM information_schema.columns
-WHERE table_schema = 'public'
-  AND table_name IN (
-      'stores',
-      'scrape_batches',
-      'raw_offers',
-      'normalized_products',
-      'product_variants',
-      'offer_snapshots'
-  )
-ORDER BY table_name, ordinal_position;
-```
-
-## Python Scraper Integration
-
-The Python scraper should:
-
-1. **Create a scrape batch:**
-   ```python
-   INSERT INTO scrape_batches (store_id, source_name, notes, started_at, status)
-   VALUES (1, 'maxima_scraper', 'Weekly scrape', NOW(), 'running')
-   RETURNING id;
-   ```
-
-2. **Insert raw offers:**
-   ```python
-   INSERT INTO raw_offers (
-       store_id, scrape_batch_id, external_id, name, price, old_price,
-       discount, unit_price, image, url, loyalty_card, scraped_at
-   ) VALUES (...);
-   ```
-
-3. **Update batch when complete:**
-   ```python
-   UPDATE scrape_batches
-   SET status = 'completed',
-       finished_at = NOW(),
-       offers_inserted = 100
-   WHERE id = ?;
-   ```
-
-## Normalization Flow
-
-The normalization script should:
-
-1. Read `raw_offers` with `normalization_status = 'pending'`
-2. Create or find `normalized_products` by matching normalized names
-3. Create or find `product_variants` by matching size/package info
-4. Link `raw_offers` to `normalized_product_id` and `product_variant_id`
-5. Create `offer_snapshots` for price history
-6. Update `normalization_status` to 'done'
-
-## Price History Queries
-
-### Get price history for a product variant:
-
-```sql
-SELECT os.*, s.name as store_name
-FROM offer_snapshots os
-JOIN stores s ON s.id = os.store_id
-WHERE os.product_variant_id = ?
-ORDER BY os.scraped_at DESC;
-```
-
-### Compare prices across stores:
-
-```sql
-SELECT s.name, os.price, os.old_price, os.scraped_at
-FROM offer_snapshots os
-JOIN stores s ON s.id = os.store_id
-WHERE os.product_variant_id = ?
-  AND os.id IN (
-      SELECT MAX(id)
-      FROM offer_snapshots
-      WHERE product_variant_id = ?
-      GROUP BY store_id
-  )
-ORDER BY os.price ASC;
-```
-
-### Find current promotions:
-
-```sql
-SELECT np.canonical_name, pv.variant_name, s.name, os.price, os.old_price
-FROM offer_snapshots os
-JOIN product_variants pv ON pv.id = os.product_variant_id
-JOIN normalized_products np ON np.id = pv.normalized_product_id
-JOIN stores s ON s.id = os.store_id
-WHERE os.is_promotion = true
-  AND os.valid_to >= CURRENT_DATE
-ORDER BY os.discount_percent DESC;
-```
-
-## Models
-
-All Eloquent models are located in `app/Models/`:
-
-- `Store.php` - Store model
-- `ScrapeBatch.php` - Scrape batch model
-- `RawOffer.php` - Raw offer model
-- `NormalizedProduct.php` - Normalized product model
-- `ProductVariant.php` - Product variant model
-- `OfferSnapshot.php` - Offer snapshot model
-
-## Relationships
-
-### Store
-- `hasMany(ScrapeBatch)`
-- `hasMany(RawOffer)`
-- `hasMany(OfferSnapshot)`
-
-### ScrapeBatch
-- `belongsTo(Store)`
-- `hasMany(RawOffer)`
-- `hasMany(OfferSnapshot)`
-
-### RawOffer
-- `belongsTo(Store)`
-- `belongsTo(ScrapeBatch)`
-- `belongsTo(NormalizedProduct)`
-- `belongsTo(ProductVariant)`
-- `hasMany(OfferSnapshot)`
-
-### NormalizedProduct
-- `hasMany(ProductVariant)`
-- `hasMany(RawOffer)`
-- `hasManyThrough(OfferSnapshot, ProductVariant)`
-
-### ProductVariant
-- `belongsTo(NormalizedProduct)`
-- `hasMany(RawOffer)`
-- `hasMany(OfferSnapshot)`
-
-### OfferSnapshot
-- `belongsTo(RawOffer)`
-- `belongsTo(ProductVariant)`
-- `belongsTo(Store)`
-- `belongsTo(ScrapeBatch)`
-- `hasOneThrough(NormalizedProduct, ProductVariant)`
+| Model | Table | Notable relations |
+|---|---|---|
+| `Store` | `stores` | `hasMany(ScrapeBatch, OfferSnapshot, CurrentOffer, RawOffer)` |
+| `Category` | `categories` | — |
+| `Subcategory` | `subcategories` | `belongsTo(Category)` |
+| `ProductFamily` | `product_families` | `belongsTo(Category, Subcategory)`, `hasMany(NormalizedProduct)` |
+| `NormalizedProduct` | `normalized_products` | `belongsTo(Category, Subcategory, ProductFamily)`, `hasMany(ProductVariant, ProductReport)`, `hasManyThrough(OfferSnapshot, CurrentOffer)` |
+| `ProductVariant` | `product_variants` | `belongsTo(NormalizedProduct)`, `hasMany(OfferSnapshot, CurrentOffer, PriceChange)` |
+| `ScrapeBatch` | `scrape_batches` | `belongsTo(Store)`, `hasMany(RawOffer)` |
+| `RawOffer` | `raw_offers` | `belongsTo(Store, ScrapeBatch)` |
+| `OfferSnapshot` | `offer_snapshots` | `belongsTo(ProductVariant, Store, RawOffer, ScrapeBatch)`, `hasOneThrough(NormalizedProduct)` |
+| `CurrentOffer` | `current_offers` | `belongsTo(Store, ProductVariant)` |
+| `PriceChange` | `price_changes` | — |
+| `User` | `users` | `hasMany(ProductReport, SavedCart, FamilySubscription)` |
+| `ProductReport` | `product_reports` | `belongsTo(User, NormalizedProduct)` |
+| `ShoppingList` | `shopping_lists` | `belongsTo(User)` |
+| `SavedCart` | `saved_carts` | `belongsTo(User)`, `hasMany(SavedCartItem)` |
+| `SavedCartItem` | `saved_cart_items` | `belongsTo(SavedCart, ProductFamily, NormalizedProduct, ProductVariant)` |
+| `FamilySubscription` | `family_subscriptions` | `belongsTo(User, ProductFamily, Store)` |
+| `NotificationLog` | `notification_log` | — |

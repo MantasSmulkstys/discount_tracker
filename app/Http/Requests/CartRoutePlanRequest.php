@@ -26,6 +26,13 @@ class CartRoutePlanRequest extends FormRequest
             'chains' => ['required', 'array', 'min:1', 'max:10'],
             'chains.*' => ['required', 'string', 'max:64'],
             'mode' => ['required', 'string', 'in:walking,driving'],
+            'items' => ['sometimes', 'array'],
+            'items.*.familyId' => ['nullable', 'integer'],
+            'items.*.normalizedProductId' => ['nullable', 'integer'],
+            'items.*.variantId' => ['nullable', 'integer'],
+            'items.*.quantity' => ['required_with:items.*', 'integer', 'min:1'],
+            'items.*.storeSlug' => ['nullable', 'string', 'max:64'],
+            'items.*.priceCents' => ['nullable', 'integer', 'min:0'],
         ];
     }
 
@@ -60,5 +67,29 @@ class CartRoutePlanRequest extends FormRequest
     public function travelMode(): string
     {
         return $this->validated('mode') === 'walking' ? 'WALK' : 'DRIVE';
+    }
+
+    /**
+     * @return list<array{
+     *     familyId: ?int,
+     *     normalizedProductId: ?int,
+     *     variantId: ?int,
+     *     quantity: int,
+     *     storeSlug: ?string,
+     *     priceCents: ?int
+     * }>
+     */
+    public function items(): array
+    {
+        $items = $this->validated('items') ?? [];
+
+        return array_map(fn (array $i): array => [
+            'familyId' => isset($i['familyId']) ? (int) $i['familyId'] : null,
+            'normalizedProductId' => isset($i['normalizedProductId']) ? (int) $i['normalizedProductId'] : null,
+            'variantId' => isset($i['variantId']) ? (int) $i['variantId'] : null,
+            'quantity' => max(1, (int) ($i['quantity'] ?? 1)),
+            'storeSlug' => isset($i['storeSlug']) ? (string) $i['storeSlug'] : null,
+            'priceCents' => isset($i['priceCents']) ? (int) $i['priceCents'] : null,
+        ], $items);
     }
 }

@@ -34,9 +34,12 @@ class MockPriceChangesSeeder extends Seeder
 
     public function run(): void
     {
-        // Wipe any previous mock rows so re-runs don't accumulate. We don't
-        // try to discriminate real vs. mock rows — by design this seeder only
-        // makes sense before real data exists.
+        if (app()->environment('production')) {
+            $this->command?->warn('Refusing to run MockPriceChangesSeeder in production.');
+
+            return;
+        }
+
         DB::table('price_changes')->delete();
 
         $offers = DB::table('current_offers')
@@ -65,8 +68,6 @@ class MockPriceChangesSeeder extends Seeder
         $rows = [];
 
         foreach ($offers as $offer) {
-            // Synthesise a previous price 8–35% higher than the current one.
-            // The wider band gives a satisfying spread on the page.
             $bumpPct = mt_rand(800, 3500) / 100;
             $previous = round((float) $offer->price * (1 + $bumpPct / 100), 2);
             $changePct = round(((float) $offer->price - $previous) / $previous * 100, 2);

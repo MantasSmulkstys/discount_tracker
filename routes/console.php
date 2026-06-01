@@ -3,10 +3,12 @@
 use App\Jobs\ExpiryGuardJob;
 use App\Jobs\NormalizePendingJob;
 use App\Jobs\ScrapeStoreJob;
+use App\Jobs\SendPriceAlertsJob;
 use App\Models\Store;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Schema;
 
@@ -32,7 +34,12 @@ try {
                     ->withoutOverlapping();
             });
     }
-} catch (Throwable) {
+} catch (Throwable $e) {
+    Log::warning('Failed to register per-store scrape schedules.', [
+        'message' => $e->getMessage(),
+    ]);
 }
 
 Schedule::job(new ExpiryGuardJob)->dailyAt('05:00')->name('expiry-guard');
+
+Schedule::job(new SendPriceAlertsJob)->dailyAt('07:30')->name('send-price-alerts');

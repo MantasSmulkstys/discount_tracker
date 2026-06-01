@@ -18,15 +18,18 @@ import {
     store as reportStore,
 } from '@/actions/App/Http/Controllers/ProductReportController';
 import EditProductDialog from '@/components/admin/EditProductDialog.vue';
-import type {AdminProduct, CategoryNode} from '@/components/admin/EditProductDialog.vue';
+import type {
+    AdminProduct,
+    CategoryNode,
+    FamilyOption,
+} from '@/components/admin/EditProductDialog.vue';
 import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
 import PriceHistoryChart from '@/components/kainu/PriceHistoryChart.vue';
-import ProductCard from '@/components/kainu/ProductCard.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
-import { discountPct, formatPrice } from '@/lib/kainu';
+import { discountPct, formatPrice, isMeaningfulCondition } from '@/lib/kainu';
 import type { KainuProduct } from '@/types/kainu';
 
 type StoreOffer = {
@@ -48,7 +51,6 @@ type StoreOffer = {
 const props = defineProps<{
     product: KainuProduct;
     offers: StoreOffer[];
-    alternatives: KainuProduct[];
     history: number[];
     historyLabels: string[];
     historyDates: string[];
@@ -56,14 +58,15 @@ const props = defineProps<{
     reportedIds: number[];
     adminEdit: AdminProduct | null;
     adminCategories: CategoryNode[] | null;
+    adminFamilies: FamilyOption[] | null;
 }>();
 
 const editingProduct = ref<AdminProduct | null>(null);
 
 function openAdminEdit() {
     if (props.adminEdit) {
-editingProduct.value = props.adminEdit;
-}
+        editingProduct.value = props.adminEdit;
+    }
 }
 
 function closeAdminEdit() {
@@ -102,12 +105,89 @@ const isProductReported = computed(() =>
     props.reportedIds.includes(props.product.normalizedProductId),
 );
 
+const displayName = computed(
+    () => props.product.displayName?.trim() || props.product.name,
+);
+
+const currentOffer = computed(
+    () => props.offers.find((o) => o.id === props.product.id) ?? null,
+);
+
+// The comparison table should show alternatives, not the product you're
+// already viewing, so drop the offer for the current product + store.
+const comparisonOffers = computed(() =>
+    props.offers.filter(
+        (o) =>
+            !(
+                o.productId === props.product.normalizedProductId &&
+                o.store === props.product.bestStore
+            ),
+    ),
+);
+
+function formatDate(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) {
+        return iso.slice(0, 10);
+    }
+
+    return d.toLocaleDateString('lt-LT', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+}
+
+const specs = computed(() => {
+    const rows: { label: string; value: string }[] = [];
+    const p = props.product;
+
+    if (p.brand) {
+        rows.push({ label: 'Prekės ženklas', value: p.brand });
+    }
+
+    const size = currentOffer.value?.sizeLabel ?? p.unit;
+    if (size) {
+        rows.push({ label: 'Kiekis', value: size });
+    }
+
+    const unitPrice = p.unitPrice ?? currentOffer.value?.unitPriceLabel ?? null;
+    if (unitPrice) {
+        rows.push({ label: 'Vieneto kaina', value: unitPrice });
+    }
+
+    if (p.condition && isMeaningfulCondition(p.condition)) {
+        rows.push({ label: 'Akcijos sąlyga', value: p.condition });
+    }
+
+    rows.push({
+        label: 'Lojalumo kortelė',
+        value: p.loyaltyCard ? 'Reikalinga' : 'Nereikalinga',
+    });
+
+    if (p.validDates) {
+        rows.push({ label: 'Galioja', value: p.validDates });
+    }
+
+    if (p.scrapedAt) {
+        rows.push({ label: 'Atnaujinta', value: formatDate(p.scrapedAt) });
+    }
+
+    return rows;
+});
+
 const qty = ref(1);
 const selectedStore = ref<string>(props.product.bestStore);
 
-const pct = computed(() =>
-    discountPct(props.product.oldPrice, props.product.bestPrice),
-);
+const pct = computed(() => {
+    const explicit = props.product.discount;
+
+    if (typeof explicit === 'number' && explicit > 0 && explicit < 100) {
+        return Math.round(explicit);
+    }
+
+    return discountPct(props.product.oldPrice, props.product.bestPrice);
+});
 
 const savings = computed(() => {
     if (!props.product.oldPrice || !props.product.bestPrice) {
@@ -137,21 +217,10 @@ function increment() {
 function decrement() {
     qty.value = Math.max(1, qty.value - 1);
 }
-
-function handleAltAdd(alt: KainuProduct) {
-    if (!isLoggedIn()) {
-        router.visit('/login');
-
-        return;
-    }
-
-    addToCart(alt);
-    openDrawer();
-}
 </script>
 
 <template>
-    <Head :title="product.name" />
+    <Head :title="displayName" />
 
     <div class="pt-5 pb-10">
         <div
@@ -169,7 +238,7 @@ function handleAltAdd(alt: KainuProduct) {
             <template v-if="product.brand">
                 <ChevronRight :size="12" />
             </template>
-            <span class="font-medium text-stone-900">{{ product.name }}</span>
+            <span class="font-medium text-stone-900">{{ displayName }}</span>
             <button
                 v-if="adminEdit"
                 type="button"
@@ -213,7 +282,7 @@ function handleAltAdd(alt: KainuProduct) {
                 <ProductImage
                     :seed="product.id"
                     :src="product.image"
-                    :name="product.name"
+                    :name="displayName"
                     :emoji="product.emoji"
                     :size="280"
                     :rounded="18"
@@ -230,7 +299,7 @@ function handleAltAdd(alt: KainuProduct) {
                 <h1
                     class="m-0 text-[30px] leading-[1.15] font-bold tracking-tight text-stone-900"
                 >
-                    {{ product.name }}
+                    {{ displayName }}
                 </h1>
                 <div
                     v-if="product.unit"
@@ -246,13 +315,30 @@ function handleAltAdd(alt: KainuProduct) {
                         class="mb-[6px] flex items-center gap-[6px] text-[11px] font-bold tracking-[0.06em] text-[#15803d] uppercase"
                     >
                         <Tag :size="12" />
-                        Geriausia kaina
+                        {{
+                            product.bestPrice !== null
+                                ? 'Geriausia kaina'
+                                : 'Nuolaida'
+                        }}
                     </div>
                     <div class="mb-2 flex flex-wrap items-baseline gap-[10px]">
                         <span
+                            v-if="product.bestPrice !== null"
                             class="text-[38px] leading-none font-bold tracking-tighter text-[#15803d]"
                         >
                             {{ formatPrice(product.bestPrice) }}
+                        </span>
+                        <span
+                            v-else-if="pct > 0"
+                            class="text-[38px] leading-none font-bold tracking-tighter text-[#15803d]"
+                        >
+                            −{{ pct }}%
+                        </span>
+                        <span
+                            v-else
+                            class="text-[38px] leading-none font-bold tracking-tighter text-[#15803d]"
+                        >
+                            —
                         </span>
                         <span
                             v-if="
@@ -271,7 +357,7 @@ function handleAltAdd(alt: KainuProduct) {
                             sutaupote {{ formatPrice(savings) }}
                         </span>
                         <ConditionBadge
-                            v-if="product.condition"
+                            v-if="isMeaningfulCondition(product.condition)"
                             :condition="product.condition"
                             size="sm"
                         />
@@ -344,15 +430,22 @@ function handleAltAdd(alt: KainuProduct) {
                     Prisijunkite, kad pridėtumėte į krepšelį
                 </Link>
 
-                <a
-                    v-if="product.url"
-                    :href="product.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-[#15803d] hover:underline"
+                <dl
+                    v-if="specs.length > 0"
+                    class="mt-5 overflow-hidden rounded-[12px] border border-[#e7e5e0]"
                 >
-                    Peržiūrėti parduotuvės puslapyje →
-                </a>
+                    <div
+                        v-for="(spec, i) in specs"
+                        :key="spec.label"
+                        class="flex items-center justify-between gap-4 px-4 py-[10px] text-[13px]"
+                        :class="i % 2 === 1 ? 'bg-[#fafaf7]' : 'bg-white'"
+                    >
+                        <dt class="text-stone-500">{{ spec.label }}</dt>
+                        <dd class="m-0 text-right font-medium text-stone-900">
+                            {{ spec.value }}
+                        </dd>
+                    </div>
+                </dl>
             </div>
         </div>
 
@@ -369,9 +462,10 @@ function handleAltAdd(alt: KainuProduct) {
                             v-if="historyIsReal"
                             class="mt-[2px] text-[12px] text-stone-500"
                         >
-                            {{ history.length }} stebėjimai
-                            ({{ historyLabels[0] }} –
-                            {{ historyLabels[historyLabels.length - 1] }})
+                            {{ history.length }} stebėjimai ({{
+                                historyLabels[0]
+                            }}
+                            – {{ historyLabels[historyLabels.length - 1] }})
                         </p>
                     </div>
                 </div>
@@ -398,27 +492,31 @@ function handleAltAdd(alt: KainuProduct) {
                         class="m-0 max-w-[360px] text-[11px] leading-relaxed text-stone-500"
                     >
                         Istorija atsiras, kai šis produktas bus stebimas bent
-                        dvi savaites — vienos savaitės akcijos kainai
-                        palyginti dar nėra su kuo.
+                        dvi savaites — vienos savaitės akcijos kainai palyginti
+                        dar nėra su kuo.
                     </p>
                 </div>
             </div>
         </section>
 
-        <section v-if="offers.length > 0" class="mb-9">
+        <section class="mb-9">
             <h2
                 class="m-0 mb-[14px] text-[18px] font-semibold tracking-tight text-stone-900"
             >
-                Palyginimas
-                <template v-if="offers.length > 1">
-                    {{ offers.length }} parduotuvėse
-                </template>
+                Panašūs pasiūlymai
+                <span
+                    v-if="comparisonOffers.length > 1"
+                    class="ml-1 text-[15px] font-medium text-stone-400"
+                >
+                    {{ comparisonOffers.length }}
+                </span>
             </h2>
             <div
+                v-if="comparisonOffers.length > 0"
                 class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
             >
                 <Link
-                    v-for="(offer, i) in offers"
+                    v-for="(offer, i) in comparisonOffers"
                     :key="`${offer.store}-${offer.id}`"
                     :href="`/products/${offer.id}`"
                     class="group relative flex gap-3 rounded-xl border bg-white p-3 transition-all hover:-translate-y-0.5 hover:shadow-md"
@@ -489,7 +587,10 @@ function handleAltAdd(alt: KainuProduct) {
                         >
                             {{ offer.unitPriceLabel }}
                         </div>
-                        <div v-if="offer.condition" class="mt-1.5">
+                        <div
+                            v-if="isMeaningfulCondition(offer.condition)"
+                            class="mt-1.5"
+                        >
                             <ConditionBadge
                                 :condition="offer.condition"
                                 size="sm"
@@ -498,34 +599,20 @@ function handleAltAdd(alt: KainuProduct) {
                     </div>
                 </Link>
             </div>
+            <div
+                v-else
+                class="rounded-[12px] border border-dashed border-[#e7e5e0] bg-[#fafaf7] px-5 py-8 text-center text-[13px] text-stone-500"
+            >
+                Nėra panašių pasiūlymų.
+            </div>
         </section>
 
         <EditProductDialog
             v-if="adminEdit && adminCategories"
             :product="editingProduct"
             :categories="adminCategories"
+            :families="adminFamilies ?? []"
             @close="closeAdminEdit"
         />
-
-        <section v-if="alternatives.length > 0">
-            <h2
-                class="m-0 mb-[14px] text-[18px] font-semibold tracking-tight text-stone-900"
-            >
-                Panašios prekės
-            </h2>
-            <div
-                class="grid grid-cols-2 gap-[14px] sm:grid-cols-3 lg:grid-cols-4"
-            >
-                <ProductCard
-                    v-for="alt in alternatives"
-                    :key="alt.id"
-                    :product="alt"
-                    :reported="reportedIds.includes(alt.normalizedProductId)"
-                    compact
-                    @add-to-cart="handleAltAdd"
-                    @toggle-report="handleToggleReport"
-                />
-            </div>
-        </section>
     </div>
 </template>

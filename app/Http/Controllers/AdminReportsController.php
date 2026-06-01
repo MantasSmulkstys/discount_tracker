@@ -25,9 +25,15 @@ class AdminReportsController extends Controller
 
     public function index(): Response
     {
+        $floor = $this->catalog->visibilityFloor();
+
         $userReported = NormalizedProduct::withCount('reports')
             ->has('reports', '>=', 5)
             ->with(['category', 'subcategory'])
+            ->when($floor !== null, fn ($q) => $q->whereHas(
+                'offerSnapshots',
+                fn ($s) => $s->where('scraped_at', '>=', $floor),
+            ))
             ->orderByDesc('reports_count')
             ->get()
             ->map(fn (NormalizedProduct $p): array => $this->payload->forProduct($p));
@@ -36,6 +42,10 @@ class AdminReportsController extends Controller
         $aiFlagged = NormalizedProduct::flaggedForReview()
             ->withCount('reports')
             ->with(['category', 'subcategory'])
+            ->when($floor !== null, fn ($q) => $q->whereHas(
+                'offerSnapshots',
+                fn ($s) => $s->where('scraped_at', '>=', $floor),
+            ))
             ->orderByRaw($driver === 'sqlite'
                 ? 'CASE WHEN ai_confidence IS NULL THEN 1 ELSE 0 END, ai_confidence ASC'
                 : 'ai_confidence ASC NULLS LAST'
@@ -47,6 +57,7 @@ class AdminReportsController extends Controller
             'userReported' => $userReported,
             'aiFlagged' => $aiFlagged,
             'categories' => $this->catalog->loadCategoryTree(),
+            'families' => $this->catalog->loadFamilies(),
         ]);
     }
 
@@ -57,6 +68,7 @@ class AdminReportsController extends Controller
             'brand' => ['nullable', 'string', 'max:255'],
             'category_id' => ['nullable', 'integer', Rule::exists('categories', 'id')],
             'subcategory_id' => ['nullable', 'integer', Rule::exists('subcategories', 'id')],
+            'family_id' => ['nullable', 'integer', Rule::exists('product_families', 'id')],
             'offers' => ['nullable', 'array'],
             'offers.*.snapshotId' => ['required', 'integer', Rule::exists('offer_snapshots', 'id')],
             'offers.*.storeId' => ['required', 'integer'],
@@ -73,6 +85,7 @@ class AdminReportsController extends Controller
                 'brand' => $validated['brand'] ?? null,
                 'category_id' => $validated['category_id'] ?? null,
                 'subcategory_id' => $validated['subcategory_id'] ?? null,
+                'family_id' => $validated['family_id'] ?? null,
                 'needs_review' => false,
                 'ai_confidence' => 1.0,
             ]);

@@ -1,15 +1,22 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { ArrowDownRight, ArrowUpRight, Plus, TriangleAlert } from 'lucide-vue-next';
+import {
+    ArrowDownRight,
+    ArrowUpRight,
+    Plus,
+    TriangleAlert,
+} from 'lucide-vue-next';
 import { computed } from 'vue';
 import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
+import SubscribeButton from '@/components/kainu/SubscribeButton.vue';
 import {
     discountPct,
     formatPrice,
     isAmbiguousDiscountCondition,
+    isMeaningfulCondition,
 } from '@/lib/kainu';
 import type { KainuProduct } from '@/types/kainu';
 
@@ -62,7 +69,9 @@ const showDiscountBadge = computed(() => {
 
     return !conditionIsAmbiguous.value;
 });
-const showConditionBadge = computed(() => condition.value !== '');
+const showConditionBadge = computed(() =>
+    isMeaningfulCondition(condition.value),
+);
 
 const priceChange = computed(() => {
     const change = props.product.priceChange;
@@ -90,6 +99,10 @@ const priceChangeLabel = computed(() => {
 
 const imageSize = computed(() => (props.compact ? 90 : 110));
 const padding = computed(() => (props.compact ? 'p-3' : 'p-[14px]'));
+
+const cardTitle = computed(
+    () => props.product.displayName?.trim() || props.product.name,
+);
 
 const handleAdd = (event: MouseEvent) => {
     event.preventDefault();
@@ -122,28 +135,34 @@ const handleReport = (event: MouseEvent) => {
             />
         </div>
 
-        <button
-            type="button"
-            :aria-label="
-                reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'
-            "
-            :title="reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'"
-            class="absolute top-2 right-2 z-[1] flex h-7 w-7 items-center justify-center rounded-full border transition-colors"
-            :class="
-                reported
-                    ? 'border-amber-300 bg-amber-50 text-amber-600'
-                    : 'border-[#e7e5e0] bg-white/90 text-stone-400 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-500'
-            "
-            @click="handleReport"
-        >
-            <TriangleAlert :size="13" :stroke-width="2" />
-        </button>
+        <div class="absolute top-2 right-2 z-[1] flex items-center gap-1.5">
+            <SubscribeButton :family-id="product.familyId" />
+
+            <button
+                type="button"
+                :aria-label="
+                    reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'
+                "
+                :title="
+                    reported ? 'Atšaukti pranešimą' : 'Pranešti apie klaidą'
+                "
+                class="flex h-7 w-7 items-center justify-center rounded-full border transition-colors"
+                :class="
+                    reported
+                        ? 'border-amber-300 bg-amber-50 text-amber-600'
+                        : 'border-[#e7e5e0] bg-white/90 text-stone-400 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-500'
+                "
+                @click="handleReport"
+            >
+                <TriangleAlert :size="13" :stroke-width="2" />
+            </button>
+        </div>
 
         <div class="mt-1 mb-[10px] flex justify-center">
             <ProductImage
                 :seed="product.id"
                 :src="product.image"
-                :name="product.name"
+                :name="cardTitle"
                 :emoji="product.emoji"
                 :size="imageSize"
             />
@@ -159,7 +178,7 @@ const handleReport = (event: MouseEvent) => {
             <h3
                 class="m-0 line-clamp-2 text-[13px] leading-[1.3] font-medium text-stone-900"
             >
-                {{ product.name }}
+                {{ cardTitle }}
             </h3>
             <div
                 v-if="product.unit"
@@ -188,7 +207,7 @@ const handleReport = (event: MouseEvent) => {
             </span>
             <span
                 v-if="priceChange"
-                class="ml-auto inline-flex items-center gap-0.5 rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold leading-none"
+                class="ml-auto inline-flex items-center gap-0.5 rounded-[5px] px-1.5 py-0.5 text-[10px] leading-none font-bold"
                 :class="
                     priceChange.isDrop
                         ? 'bg-[#15803d]/10 text-[#15803d]'

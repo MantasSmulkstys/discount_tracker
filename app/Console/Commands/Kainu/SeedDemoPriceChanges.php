@@ -18,6 +18,12 @@ class SeedDemoPriceChanges extends Command
 
     public function handle(): int
     {
+        if (app()->environment('production')) {
+            $this->error('Refusing to run kainu:seed-demo-price-changes in production.');
+
+            return self::FAILURE;
+        }
+
         if ($this->option('fresh')) {
             $this->cleanup();
         }

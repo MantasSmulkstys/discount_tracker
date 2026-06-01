@@ -80,8 +80,8 @@ const categoryLabel = computed(() => {
     return 'Visi pasiūlymai';
 });
 
-const priceMax = ref<number>(props.filters.maxPrice ?? 20);
-const discountOnly = ref<boolean>(props.filters.discount);
+const PRICE_MAX = 50;
+const priceMax = ref<number>(props.filters.maxPrice ?? PRICE_MAX);
 const searchInput = ref<string>(props.filters.q ?? '');
 const showFiltersMobile = ref<boolean>(false);
 
@@ -102,14 +102,7 @@ onUnmounted(() => {
 watch(
     () => props.filters.maxPrice,
     (next) => {
-        priceMax.value = next ?? 20;
-    },
-);
-
-watch(
-    () => props.filters.discount,
-    (next) => {
-        discountOnly.value = next;
+        priceMax.value = next ?? PRICE_MAX;
     },
 );
 
@@ -220,13 +213,12 @@ function onPriceInput(event: Event) {
     }
 
     priceDebounce = setTimeout(() => {
-        updateFilters({ maxPrice: priceMax.value });
+        // At the top of the track the filter is "no limit", so clear it rather
+        // than capping at PRICE_MAX (which would hide pricier offers silently).
+        updateFilters({
+            maxPrice: priceMax.value >= PRICE_MAX ? null : priceMax.value,
+        });
     }, 250);
-}
-
-function toggleDiscountOnly() {
-    discountOnly.value = !discountOnly.value;
-    updateFilters({ discount: discountOnly.value });
 }
 
 function clearAll() {
@@ -489,54 +481,43 @@ function storeMeta(storeId: string) {
                         </h3>
                         <div class="px-2">
                             <div class="mb-2 text-[13px] text-stone-700">
-                                0 € –
-                                <strong>
-                                    {{ priceMax.toFixed(2).replace('.', ',') }}
-                                    €
-                                </strong>
+                                <template v-if="priceMax >= PRICE_MAX">
+                                    Bet kokia kaina
+                                </template>
+                                <template v-else>
+                                    Iki
+                                    <strong>
+                                        {{
+                                            priceMax
+                                                .toFixed(2)
+                                                .replace('.', ',')
+                                        }}
+                                        €
+                                    </strong>
+                                </template>
                             </div>
                             <input
                                 type="range"
-                                min="1"
-                                max="50"
+                                min="0.5"
+                                :max="PRICE_MAX"
                                 step="0.5"
                                 :value="priceMax"
                                 class="w-full accent-[#15803d]"
                                 @input="onPriceInput"
                             />
-                        </div>
-                    </div>
-
-                    <div>
-                        <button
-                            type="button"
-                            class="flex w-full items-center gap-[10px] rounded-[8px] px-2 py-[7px] text-[13px] text-stone-900"
-                            @click="toggleDiscountOnly"
-                        >
-                            <span
-                                class="relative h-[18px] w-8 shrink-0 rounded-full transition-colors"
-                                :class="
-                                    discountOnly
-                                        ? 'bg-[#15803d]'
-                                        : 'bg-stone-300'
-                                "
+                            <div
+                                class="mt-1 flex justify-between text-[11px] text-stone-400"
                             >
-                                <span
-                                    class="absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-all"
-                                    :style="{
-                                        left: discountOnly ? '16px' : '2px',
-                                    }"
-                                />
-                            </span>
-                            <span class="font-medium">Tik su nuolaida</span>
-                        </button>
+                                <span>0,50 €</span>
+                                <span>{{ PRICE_MAX }}+ €</span>
+                            </div>
+                        </div>
                     </div>
 
                     <button
                         v-if="
                             filters.category !== 'all' ||
                             filters.stores.length > 0 ||
-                            filters.discount ||
                             filters.q ||
                             filters.maxPrice
                         "

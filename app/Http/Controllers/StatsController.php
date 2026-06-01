@@ -33,9 +33,12 @@ class StatsController extends Controller
      */
     private function biggestChanges(): array
     {
+        $floor = $this->catalog->visibilityFloor();
+
         $latestIds = DB::table('price_changes')
             ->whereNotNull('change_pct')
             ->where('change_pct', '!=', 0)
+            ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
             ->groupBy('product_variant_id', 'store_id')
             ->selectRaw('MAX(id) as id');
 
@@ -43,10 +46,13 @@ class StatsController extends Controller
             ->join('product_variants', 'product_variants.id', '=', 'price_changes.product_variant_id')
             ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
             ->join('stores', 'stores.id', '=', 'price_changes.store_id')
+            ->leftJoin('offer_snapshots as os_change', 'os_change.id', '=', 'price_changes.snapshot_id')
+            ->leftJoin('raw_offers as ro_change', 'ro_change.id', '=', 'os_change.raw_offer_id')
             ->whereIn('price_changes.id', $latestIds)
+            ->when($floor !== null, fn ($q) => $q->where('price_changes.changed_at', '>=', $floor))
             ->orderByRaw('ABS(price_changes.change_pct) DESC')
             ->limit(self::CHANGES_LIMIT)
-            ->get([
+            ->select([
                 'price_changes.id',
                 'price_changes.previous_price',
                 'price_changes.new_price',
@@ -55,10 +61,11 @@ class StatsController extends Controller
                 'price_changes.snapshot_id',
                 'normalized_products.canonical_name as product_name',
                 'normalized_products.brand',
-                'normalized_products.image_url',
                 'product_variants.variant_name',
                 'stores.name as store_name',
-            ]);
+            ])
+            ->selectRaw('COALESCE(ro_change.image, normalized_products.image_url) AS image_url')
+            ->get();
 
         return $rows->map(fn ($row) => [
             'id' => (int) $row->id,
@@ -81,19 +88,26 @@ class StatsController extends Controller
      */
     private function summary(): array
     {
+        $floor = $this->catalog->visibilityFloor();
+
         return [
             'totalProducts' => (int) $this->catalog->offersQuery()->count(),
             'totalStores' => (int) DB::table('stores')->count(),
-            'totalSnapshots' => (int) DB::table('offer_snapshots')->count(),
+            'totalSnapshots' => (int) DB::table('offer_snapshots')
+                ->when($floor !== null, fn ($q) => $q->where('scraped_at', '>=', $floor))
+                ->count(),
             'totalChanges' => (int) DB::table('price_changes')
                 ->whereNotNull('change_pct')
                 ->where('change_pct', '!=', 0)
+                ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
                 ->count(),
             'totalDrops' => (int) DB::table('price_changes')
                 ->where('change_pct', '<', 0)
+                ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
                 ->count(),
             'totalRaises' => (int) DB::table('price_changes')
                 ->where('change_pct', '>', 0)
+                ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
                 ->count(),
         ];
     }

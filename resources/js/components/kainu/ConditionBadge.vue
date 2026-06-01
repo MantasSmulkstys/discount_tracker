@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { isMeaningfulCondition } from '@/lib/kainu';
 
 type Props = {
     condition: string | null | undefined;
@@ -21,7 +22,11 @@ const classes = computed(() => {
     }
 });
 
-const text = computed(() => (props.condition ?? '').trim());
+const text = computed(() => {
+    const trimmed = (props.condition ?? '').trim();
+
+    return isMeaningfulCondition(trimmed) ? trimmed : '';
+});
 </script>
 
 <template>

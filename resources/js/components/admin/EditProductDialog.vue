@@ -6,6 +6,8 @@ import { computed, watch } from 'vue';
 import { update } from '@/actions/App/Http/Controllers/AdminReportsController';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { Button } from '@/components/ui/button';
+import { Combobox } from '@/components/ui/combobox';
+import type { ComboboxOption } from '@/components/ui/combobox';
 import {
     Dialog,
     DialogContent,
@@ -45,6 +47,8 @@ export type AdminProduct = {
     categoryName: string | null;
     subcategoryId: number | null;
     subcategoryName: string | null;
+    familyId: number | null;
+    familyName: string | null;
     aiConfidence: number | null;
     needsReview: boolean;
     reportsCount: number;
@@ -62,6 +66,12 @@ export type CategoryNode = {
     subcategories: { id: number; slug: string; name: string }[];
 };
 
+export type FamilyOption = {
+    id: number;
+    nameLt: string;
+    key: string;
+};
+
 type EditableOffer = AdminOffer & {
     priceInput: string;
     oldPriceInput: string;
@@ -72,6 +82,7 @@ type EditableOffer = AdminOffer & {
 const props = defineProps<{
     product: AdminProduct | null;
     categories: CategoryNode[];
+    families?: FamilyOption[];
     saveLabel?: string;
 }>();
 
@@ -85,8 +96,16 @@ const form = useForm({
     brand: '',
     category_id: null as number | null,
     subcategory_id: null as number | null,
+    family_id: null as number | null,
     offers: [] as EditableOffer[],
 });
+
+const familyOptions = computed<ComboboxOption[]>(() =>
+    (props.families ?? []).map((family) => ({
+        value: family.id,
+        label: family.nameLt,
+    })),
+);
 
 watch(
     () => props.product,
@@ -101,6 +120,7 @@ watch(
         form.brand = product.brand ?? '';
         form.category_id = product.categoryId;
         form.subcategory_id = product.subcategoryId;
+        form.family_id = product.familyId;
         form.offers = product.offers.map((o) => ({
             ...o,
             priceInput: o.price !== null ? formatNumberInput(o.price) : '',
@@ -148,6 +168,11 @@ function onSubcategoryChange(value: AcceptableValue) {
     form.subcategory_id = selectValueToId(value);
 }
 
+function onFamilyChange(value: number | string | null) {
+    form.family_id =
+        value === null ? null : selectValueToId(value as AcceptableValue);
+}
+
 function submit() {
     if (!props.product) {
 return;
@@ -158,6 +183,7 @@ return;
         brand: form.brand,
         category_id: form.category_id,
         subcategory_id: form.subcategory_id,
+        family_id: form.family_id,
         offers: form.offers.map((o) => ({
             snapshotId: o.snapshotId,
             storeId: o.storeId,
@@ -340,6 +366,26 @@ return `${diffDays}d ago`;
                                 </SelectItem>
                             </SelectContent>
                         </Select>
+                    </div>
+
+                    <div
+                        v-if="familyOptions.length > 0"
+                        class="space-y-1.5 sm:col-span-2"
+                    >
+                        <Label>Šeima</Label>
+                        <Combobox
+                            :model-value="form.family_id"
+                            :options="familyOptions"
+                            placeholder="Be šeimos"
+                            search-placeholder="Ieškoti šeimos…"
+                            empty-text="Šeimų nerasta."
+                            :disabled="form.processing"
+                            @update:model-value="onFamilyChange"
+                        />
+                        <p class="text-xs text-slate-500">
+                            Šeima sujungia tą patį produktą skirtingose
+                            parduotuvėse ir lemia rodomus panašius pasiūlymus.
+                        </p>
                     </div>
                 </div>
 

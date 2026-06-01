@@ -3,13 +3,14 @@ import { Head } from '@inertiajs/vue3';
 import { Bot, Flag, Pencil, TriangleAlert } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import EditProductDialog from '@/components/admin/EditProductDialog.vue';
-import type {AdminProduct, CategoryNode} from '@/components/admin/EditProductDialog.vue';
+import type {AdminProduct, CategoryNode, FamilyOption} from '@/components/admin/EditProductDialog.vue';
 import { Button } from '@/components/ui/button';
 
 const props = defineProps<{
     userReported: AdminProduct[];
     aiFlagged: AdminProduct[];
     categories: CategoryNode[];
+    families: FamilyOption[];
 }>();
 
 const activeTab = ref<'user' | 'ai'>('user');
@@ -175,6 +176,7 @@ const currentList = computed(() =>
     <EditProductDialog
         :product="editingProduct"
         :categories="categories"
+        :families="families"
         save-label="Save & Dismiss Reports"
         @close="closeEdit"
     />

@@ -89,4 +89,18 @@ class OfferSnapshot extends Model
             ->groupBy('pv_latest.normalized_product_id', 'os_latest.store_id')
             ->selectRaw('MAX(os_latest.id)');
     }
+
+    /**
+     * Latest snapshot id per (variant, store) — one row per product *variant*.
+     *
+     * Unlike latestIdsPerProductStoreSubquery (one row per product per store),
+     * this keeps every distinct variant, so the catalog lists all sizes of a
+     * product (e.g. "800 g" and "4x100 g") instead of collapsing to one.
+     */
+    public static function latestIdsPerVariantStoreSubquery(): Builder
+    {
+        return DB::table('offer_snapshots as os_latest')
+            ->groupBy('os_latest.product_variant_id', 'os_latest.store_id')
+            ->selectRaw('MAX(os_latest.id)');
+    }
 }

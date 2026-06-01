@@ -32,10 +32,10 @@ it('creates every catalog and offer table', function (): void {
     }
 });
 
-it('seeds the six Lithuanian grocery stores', function (): void {
+it('seeds the five Lithuanian grocery stores', function (): void {
     $slugs = Store::query()->orderBy('slug')->pluck('slug')->all();
 
-    expect($slugs)->toEqual(['aibe', 'iki', 'lidl', 'maxima', 'norfa', 'rimi']);
+    expect($slugs)->toEqual(['iki', 'lidl', 'maxima', 'norfa', 'rimi']);
 });
 
 it('seeds the category taxonomy with subcategories', function (): void {

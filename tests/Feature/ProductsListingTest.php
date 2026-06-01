@@ -205,6 +205,77 @@ test('listing keeps one row per store when the same product is sold by multiple 
         );
 });
 
+test('listing shows every variant of the same product', function () {
+    // First variant (800 g) via the helper.
+    seedSnapshot([
+        'store_name' => 'testmart',
+        'raw_external_id' => 'fernando-800',
+        'product_name' => 'Grikių kruopos FERNANDO, 800 g',
+        'normalized_name' => 'grikiu kruopos fernando',
+        'brand' => 'Fernando',
+        'price' => 1.35,
+    ]);
+
+    // Second variant (4x100 g) under the SAME product + store.
+    $normalizedProductId = DB::table('normalized_products')
+        ->where('normalized_name', 'grikiu kruopos fernando')
+        ->where('brand', 'Fernando')
+        ->value('id');
+    $storeId = DB::table('stores')->where('name', 'testmart')->value('id');
+
+    $variantId = DB::table('product_variants')->insertGetId([
+        'normalized_product_id' => $normalizedProductId,
+        'variant_name' => '4x100 g',
+        'size_value' => 100,
+        'size_unit' => 'g',
+        'package_count' => 4,
+        'package_unit' => 'vnt',
+        'net_quantity_value' => null,
+        'net_quantity_unit' => null,
+        'attributes' => null,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $rawOfferId = DB::table('raw_offers')->insertGetId([
+        'store_id' => $storeId,
+        'content_hash' => 'fernando-4x100',
+        'name' => 'Grikių kruopos FERNANDO, 4x100 g',
+        'price' => 0.82,
+        'scraped_at' => Carbon::now(),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    DB::table('offer_snapshots')->insert([
+        'raw_offer_id' => $rawOfferId,
+        'product_variant_id' => $variantId,
+        'store_id' => $storeId,
+        'week_starting' => Carbon::now()->startOfWeek()->toDateString(),
+        'price' => 0.82,
+        'old_price' => null,
+        'discount_percent' => null,
+        'loyalty_card' => false,
+        'unit_price_value' => null,
+        'unit_price_unit' => null,
+        'valid_from' => null,
+        'valid_to' => null,
+        'scraped_at' => Carbon::now(),
+        'is_promotion' => false,
+        'created_at' => now(),
+    ]);
+
+    $response = $this->get(route('products.index'));
+
+    // Both the 800 g and the 4x100 g variant are listed, not collapsed to one.
+    $response->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('kainu/Products/Index')
+            ->has('products.data', 2)
+            ->where('products.meta.total', 2)
+        );
+});
+
 test('search filter matches the normalized product name', function () {
     seedSnapshot([
         'product_name' => 'Rokiškio pienas 1 L',

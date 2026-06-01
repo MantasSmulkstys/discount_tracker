@@ -17,6 +17,8 @@ class NormalizedProduct extends Model
     /** @use HasFactory<NormalizedProductFactory> */
     use HasFactory;
 
+    public const REVIEW_CONFIDENCE_THRESHOLD = 0.7;
+
     protected $table = 'normalized_products';
 
     protected $guarded = [];
@@ -43,7 +45,7 @@ class NormalizedProduct extends Model
      */
     public function scopeFlaggedForReview(Builder $query): Builder
     {
-        return $query->where('ai_confidence', '<', 0.7);
+        return $query->where('ai_confidence', '<', self::REVIEW_CONFIDENCE_THRESHOLD);
     }
 
     /**

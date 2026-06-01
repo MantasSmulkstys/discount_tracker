@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\CartRoutePlanRequest;
 use App\Models\Store;
+use App\Services\CartOptimizer;
 use App\Services\Maps\PlacesApiClient;
 use App\Services\Maps\RoutesApiClient;
 use Illuminate\Http\JsonResponse;
@@ -20,10 +21,12 @@ class RoutePlanController extends Controller
         CartRoutePlanRequest $request,
         RoutesApiClient $routes,
         PlacesApiClient $places,
+        CartOptimizer $optimizer,
     ): JsonResponse {
         $origin = $request->origin();
         $chains = $request->chains();
         $travelMode = $request->travelMode();
+        $items = $request->items();
 
         try {
             $stops = $this->resolveStops($places, $origin, $chains);
@@ -68,7 +71,46 @@ class RoutePlanController extends Controller
             ], 502);
         }
 
-        return response()->json($payload);
+        $alternatives = [];
+        if ($items !== []) {
+            $opt = $optimizer->optimize($items, $origin, $travelMode);
+            $baselineDuration = (int) $payload['totalDurationSec'];
+            $alternatives = $this->reframeAlternatives($opt, $baselineDuration);
+        }
+
+        return response()->json([
+            'routePlan' => $payload,
+            ...$payload,
+            'alternatives' => $alternatives,
+        ]);
+    }
+
+    /**
+     * Recompute the route-time delta against the actually-driven baseline.
+     *
+     * @param  array{
+     *     baseline: array{totalPriceCents: int, totalDurationSec: int, stores: list<string>}|null,
+     *     alternatives: list<array{
+     *         label: string, stores: list<string>, totalPriceCents: int, totalDurationSec: int,
+     *         priceDeltaCents: int, durationDeltaSec: int,
+     *         items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>
+     *     }>
+     * }  $opt
+     * @return list<array<string, mixed>>
+     */
+    private function reframeAlternatives(array $opt, int $baselineDuration): array
+    {
+        $alternatives = $opt['alternatives'];
+
+        if ($alternatives === [] || $opt['baseline'] === null) {
+            return $alternatives;
+        }
+
+        return array_map(static function (array $alt) use ($baselineDuration): array {
+            $alt['durationDeltaSec'] = $alt['totalDurationSec'] - $baselineDuration;
+
+            return $alt;
+        }, $alternatives);
     }
 
     /**

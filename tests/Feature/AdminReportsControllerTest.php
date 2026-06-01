@@ -2,6 +2,7 @@
 
 use App\Enums\UserRole;
 use App\Models\NormalizedProduct;
+use App\Models\ProductFamily;
 use App\Models\ProductReport;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -196,6 +197,95 @@ test('admin can update a product and reports are cleared', function () {
     expect($product->brand)->toBe('New Brand');
     expect($product->needs_review)->toBeFalse();
     expect(ProductReport::where('normalized_product_id', $product->id)->count())->toBe(0);
+});
+
+test('admin can assign a family to a product', function () {
+    $admin = makeAdmin();
+    $product = NormalizedProduct::factory()->create(['family_id' => null]);
+    $family = ProductFamily::create([
+        'family_name' => 'Sūris',
+        'normalized_family_name' => 'suris',
+        'generic_name' => 'suris',
+    ]);
+
+    $this->actingAs($admin)
+        ->patch("/admin/products/{$product->id}", [
+            'canonical_name' => $product->canonical_name,
+            'family_id' => $family->id,
+        ])
+        ->assertRedirect();
+
+    $product->refresh();
+    expect($product->family_id)->toBe($family->id);
+});
+
+test('admin can clear a product family', function () {
+    $admin = makeAdmin();
+    $family = ProductFamily::create([
+        'family_name' => 'Sūris',
+        'normalized_family_name' => 'suris',
+        'generic_name' => 'suris',
+    ]);
+    $product = NormalizedProduct::factory()->create(['family_id' => $family->id]);
+
+    $this->actingAs($admin)
+        ->patch("/admin/products/{$product->id}", [
+            'canonical_name' => $product->canonical_name,
+            'family_id' => null,
+        ])
+        ->assertRedirect();
+
+    $product->refresh();
+    expect($product->family_id)->toBeNull();
+});
+
+test('admin update rejects a non-existent family', function () {
+    $admin = makeAdmin();
+    $product = NormalizedProduct::factory()->create();
+
+    $this->actingAs($admin)
+        ->patch("/admin/products/{$product->id}", [
+            'canonical_name' => $product->canonical_name,
+            'family_id' => 999999,
+        ])
+        ->assertSessionHasErrors('family_id');
+});
+
+test('reports payload exposes family id and name', function () {
+    $admin = makeAdmin();
+    $family = ProductFamily::create([
+        'family_name' => 'Sūris',
+        'normalized_family_name' => 'suris',
+        'generic_name' => 'suris',
+    ]);
+    $product = NormalizedProduct::factory()->lowConfidence()->create([
+        'family_id' => $family->id,
+    ]);
+
+    $this->actingAs($admin)
+        ->get('/admin/reports')
+        ->assertInertia(fn ($page) => $page
+            ->where('aiFlagged.0.familyId', $family->id)
+            ->where('aiFlagged.0.familyName', 'Sūris')
+        );
+});
+
+test('reports page exposes the family vocabulary', function () {
+    $admin = makeAdmin();
+    $family = ProductFamily::create([
+        'family_name' => 'Sūris',
+        'normalized_family_name' => 'suris',
+        'generic_name' => 'suris',
+    ]);
+
+    $this->actingAs($admin)
+        ->get('/admin/reports')
+        ->assertInertia(fn ($page) => $page
+            ->has('families')
+            ->where('families.0.id', $family->id)
+            ->where('families.0.nameLt', 'Sūris')
+            ->where('families.0.key', 'suris')
+        );
 });
 
 test('admin update validates required fields', function () {

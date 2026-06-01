@@ -12,6 +12,14 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
+/**
+ * Shells out to the Python normalization pipeline.
+ *
+ * `$tries = 1` is intentional: each run drains its own batch from
+ * `raw_offers` and re-running for transient OpenAI failures would
+ * double-bill credits. The script itself is idempotent — the next
+ * scheduled run will pick up rows still marked pending.
+ */
 class NormalizePendingJob implements ShouldQueue
 {
     use Dispatchable;
@@ -20,6 +28,8 @@ class NormalizePendingJob implements ShouldQueue
     use SerializesModels;
 
     public int $tries = 1;
+
+    private const BATCH_SIZE = 25;
 
     public function handle(): void
     {
@@ -37,7 +47,7 @@ class NormalizePendingJob implements ShouldQueue
                 'scripts.process_raw_offers_normalized',
                 '--use-ai',
                 '--batch-size',
-                '50',
+                (string) self::BATCH_SIZE,
             ]);
 
         if ($result->failed()) {

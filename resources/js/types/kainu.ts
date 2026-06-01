@@ -3,11 +3,16 @@ import type { CategoryId } from '@/lib/kainu';
 export type KainuProduct = {
     id: number;
     normalizedProductId: number;
+    familyId?: number | null;
     name: string;
+    displayName?: string | null;
+    canonicalName?: string | null;
+    familyName?: string | null;
     normalizedName?: string | null;
     brand: string | null;
     category: CategoryId | string;
     unit: string | null;
+    unitPrice?: string | null;
     emoji: string;
     bestPrice: number | null;
     oldPrice: number | null;
@@ -54,17 +59,6 @@ export type KainuPageLink = {
     url: string | null;
     label: string;
     active: boolean;
-};
-
-export type KainuStoreLocation = {
-    id: string;
-    chain: string;
-    name: string;
-    address: string;
-    city: string;
-    lat: number;
-    lng: number;
-    distanceKm?: number | null;
 };
 
 export type GoogleMapsConfig = {

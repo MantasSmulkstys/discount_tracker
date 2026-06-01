@@ -216,3 +216,55 @@ export function isAmbiguousDiscountCondition(
 ): boolean {
     return /^\d+\s*\+\s*\d+$/.test((condition ?? '').trim());
 }
+
+function normalizeCondition(condition: string): string {
+    return condition
+        .trim()
+        .replace(/\s+/g, ' ')
+        .toLowerCase()
+        .replace(/[ąā]/g, 'a')
+        .replace(/[ėęē]/g, 'e')
+        .replace(/[įīy]/g, 'i')
+        .replace(/[ųūu]/g, 'u')
+        .replace(/[š]/g, 's')
+        .replace(/[č]/g, 'c')
+        .replace(/[ž]/g, 'z');
+}
+
+/**
+ * Pure marketing labels that carry no purchase information. Stored
+ * diacritic-free and lowercased to match normalizeCondition() output.
+ */
+const MEANINGLESS_CONDITIONS = new Set([
+    'tik',
+    'super kaina',
+    'superkaina',
+    'super',
+    'akcija',
+    'akcijos kaina',
+    'kaina',
+    'nauja',
+    'naujiena',
+    'hit',
+    'top',
+    'pigiau',
+    'pasiulymas',
+    'pasiulymai',
+]);
+
+/**
+ * Whether a scraped condition is worth showing. Filters out store marketing
+ * noise (e.g. IKI's "TIK", "SUPER KAINA") while keeping real conditions like
+ * "1+1" or "Perkant 2 vnt".
+ */
+export function isMeaningfulCondition(
+    condition: string | null | undefined,
+): boolean {
+    const normalized = normalizeCondition(condition ?? '');
+
+    if (normalized === '') {
+        return false;
+    }
+
+    return !MEANINGLESS_CONDITIONS.has(normalized);
+}

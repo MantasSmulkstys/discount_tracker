@@ -15,7 +15,7 @@ class AdminProductPayload
      */
     public function forProduct(NormalizedProduct $product): array
     {
-        $product->loadMissing(['category', 'subcategory']);
+        $product->loadMissing(['category', 'subcategory', 'family']);
         if ($product->reports_count === null) {
             $product->loadCount('reports');
         }
@@ -31,6 +31,8 @@ class AdminProductPayload
             'categoryName' => $product->category?->name_lt,
             'subcategoryId' => $product->subcategory_id,
             'subcategoryName' => $product->subcategory?->name_lt,
+            'familyId' => $product->family_id !== null ? (int) $product->family_id : null,
+            'familyName' => $product->family?->family_name,
             'aiConfidence' => $product->ai_confidence !== null ? (float) $product->ai_confidence : null,
             'needsReview' => (bool) $product->needs_review,
             'reportsCount' => (int) ($product->reports_count ?? 0),

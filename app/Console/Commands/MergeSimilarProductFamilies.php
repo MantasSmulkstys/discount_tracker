@@ -9,6 +9,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use stdClass;
 
 #[Signature('products:merge-similar-families {--apply : Actually perform the merges} {--threshold=75 : Similarity percentage to merge at (0-100)}')]
@@ -94,6 +95,19 @@ class MergeSimilarProductFamilies extends Command
                     $reassigned += DB::table('normalized_products')
                         ->where('family_id', $loser->id)
                         ->update(['family_id' => $winner->id]);
+
+                    if (Schema::hasTable('family_subscriptions')) {
+                        DB::table('family_subscriptions')
+                            ->where('family_id', $loser->id)
+                            ->update(['family_id' => $winner->id]);
+                    }
+
+                    if (Schema::hasTable('notification_log')) {
+                        DB::table('notification_log')
+                            ->where('family_id', $loser->id)
+                            ->delete();
+                    }
+
                     $deleted += DB::table('product_families')
                         ->where('id', $loser->id)
                         ->delete();

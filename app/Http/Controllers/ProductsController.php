@@ -126,6 +126,7 @@ class ProductsController extends Controller
                 ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
                 ->join('stores', 'stores.id', '=', 'offer_snapshots.store_id')
                 ->leftJoin('raw_offers', 'raw_offers.id', '=', 'offer_snapshots.raw_offer_id')
+                ->leftJoin('product_families', 'product_families.id', '=', 'normalized_products.family_id')
                 ->where('offer_snapshots.id', $id)
                 ->select([
                     'offer_snapshots.id',
@@ -149,10 +150,13 @@ class ProductsController extends Controller
                     'normalized_products.brand',
                     'normalized_products.category_id',
                     'normalized_products.subcategory_id',
-                    'normalized_products.image_url',
+                    'normalized_products.family_id',
                     'stores.id as store_db_id',
                     'stores.name as store_name',
                     'raw_offers.url as source_url',
+                    'raw_offers.name as raw_product_name',
+                    'product_families.family_name',
+                    'product_families.generic_name as family_generic_name',
                 ])
                 ->selectRaw('
                     COALESCE(
@@ -165,6 +169,7 @@ class ProductsController extends Controller
                         END
                     ) as effective_discount
                 ')
+                ->selectRaw('COALESCE(raw_offers.image, normalized_products.image_url) AS image_url')
                 ->first();
         }
 
@@ -187,20 +192,6 @@ class ProductsController extends Controller
             ]]);
         }
 
-        $alternatives = $this->catalog
-            ->offersQuery()
-            ->where('offer_snapshots.id', '!=', $id)
-            ->where('normalized_products.id', '!=', (int) $row->normalized_product_id)
-            ->whereNotNull('offer_snapshots.price')
-            ->when($product['category'] !== 'all', function (Builder $q) use ($product): void {
-                $this->catalog->applyCategory($q, $product['category']);
-            })
-            ->inRandomOrder()
-            ->limit(4)
-            ->get()
-            ->map(fn (object $r) => $this->catalog->hydrate($r))
-            ->values();
-
         $real = $this->catalog->priceHistory(
             (int) $row->normalized_product_id,
             isset($row->store_db_id) ? (int) $row->store_db_id : null,
@@ -215,18 +206,19 @@ class ProductsController extends Controller
         $user = auth()->user();
         $adminEdit = null;
         $adminCategories = null;
+        $adminFamilies = null;
         if ($user && $user->isAdmin()) {
             $model = NormalizedProduct::find((int) $row->normalized_product_id);
             if ($model) {
                 $adminEdit = $this->adminPayload->forProduct($model);
                 $adminCategories = $this->catalog->loadCategoryTree();
+                $adminFamilies = $this->catalog->loadFamilies();
             }
         }
 
         return Inertia::render('kainu/Products/Show', [
             'product' => $product,
             'offers' => $priceOffers,
-            'alternatives' => $alternatives,
             'history' => $real['values'],
             'historyLabels' => $real['labels'],
             'historyDates' => $real['dates'],
@@ -234,6 +226,7 @@ class ProductsController extends Controller
             'reportedIds' => $reportedIds,
             'adminEdit' => $adminEdit,
             'adminCategories' => $adminCategories,
+            'adminFamilies' => $adminFamilies,
         ]);
     }
 
@@ -253,6 +246,7 @@ class ProductsController extends Controller
             ->whereNotNull('offer_snapshots.price');
 
         $this->catalog->applyFreshness($query);
+        $this->catalog->applyVisibilityFloor($query);
 
         return $query
             ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
@@ -266,15 +260,16 @@ class ProductsController extends Controller
                 'product_variants.size_value',
                 'product_variants.size_unit',
                 'normalized_products.canonical_name as product_name',
-                'normalized_products.image_url as product_image',
                 'stores.name as store_name',
                 'raw_offers.url as source_url',
+                'raw_offers.name as raw_product_name',
             ])
+            ->selectRaw('COALESCE(raw_offers.image, normalized_products.image_url) AS product_image')
             ->get()
             ->map(fn (object $offer): array => [
                 'id' => (int) $offer->id,
                 'productId' => (int) $offer->variant_product_id,
-                'productName' => (string) $offer->product_name,
+                'productName' => $this->preferRawName($offer),
                 'imageUrl' => $offer->product_image,
                 'store' => Str::slug((string) $offer->store_name),
                 'storeName' => Str::title((string) $offer->store_name),
@@ -289,43 +284,183 @@ class ProductsController extends Controller
             ->values();
     }
 
+    /**
+     * The store's raw scraped name when present, otherwise the canonical name.
+     * Mirrors KainuCatalog::hydrate()'s displayName so the comparison cards
+     * show the same wording as the listing.
+     */
+    private function preferRawName(object $offer): string
+    {
+        $raw = isset($offer->raw_product_name)
+            ? trim((string) $offer->raw_product_name)
+            : '';
+
+        return $raw !== '' ? $raw : (string) $offer->product_name;
+    }
+
     private function formatUnitPrice(float $price, mixed $sizeValue, mixed $sizeUnit): ?string
     {
         if ($sizeValue === null || $sizeUnit === null || $sizeUnit === '' || (float) $sizeValue <= 0) {
             return null;
         }
-        $perUnit = $price / (float) $sizeValue;
 
-        return number_format($perUnit, 2, ',', '').' €/'.$sizeUnit;
+        $unit = mb_strtolower(trim((string) $sizeUnit));
+
+        // Convert the size to a base unit (kg / l) so the resulting price is the
+        // familiar €/kg or €/l rather than a tiny €/g or €/ml figure.
+        [$factor, $displayUnit] = match ($unit) {
+            'mg' => [0.000001, 'kg'],
+            'g' => [0.001, 'kg'],
+            'kg' => [1.0, 'kg'],
+            'ml' => [0.001, 'l'],
+            'cl' => [0.01, 'l'],
+            'dl' => [0.1, 'l'],
+            'l' => [1.0, 'l'],
+            default => [1.0, $unit],
+        };
+
+        $baseQuantity = (float) $sizeValue * $factor;
+        if ($baseQuantity <= 0) {
+            return null;
+        }
+
+        $perUnit = $price / $baseQuantity;
+
+        return number_format($perUnit, 2, ',', '').' €/'.$displayUnit;
     }
 
     /**
+     * The set of normalized products that should appear in the comparison.
+     *
+     * Membership = (same AI family) OR (same subcategory/category that shares
+     * the family's core noun, e.g. "vanduo" links "gazuotas vanduo" and
+     * "mineralinis vanduo"), then narrowed to the same measurement dimension
+     * (volume / weight / count) so we still compare like with like.
+     *
      * @return array<int, int>
      */
     private function familySiblingProductIds(int $normalizedProductId): array
     {
-        $product = DB::table('normalized_products as np')
+        $self = DB::table('normalized_products as np')
             ->leftJoin('product_variants as pv', 'pv.normalized_product_id', '=', 'np.id')
+            ->leftJoin('product_families as pf', 'pf.id', '=', 'np.family_id')
             ->where('np.id', $normalizedProductId)
-            ->select(['np.family_id', 'pv.size_unit'])
+            ->select([
+                'np.family_id',
+                'np.subcategory_id',
+                'np.category_id',
+                'np.generic_name as np_generic',
+                'pv.size_unit',
+                'pf.family_name',
+                'pf.generic_name as family_generic',
+            ])
             ->first();
 
-        if (! $product || $product->family_id === null) {
+        if (! $self) {
             return [$normalizedProductId];
         }
 
-        $q = DB::table('normalized_products as np')
-            ->join('product_variants as pv', 'pv.normalized_product_id', '=', 'np.id')
-            ->where('np.family_id', (int) $product->family_id);
-        if ($product->size_unit === null) {
-            $q->whereNull('pv.size_unit');
-        } else {
-            $q->where('pv.size_unit', $product->size_unit);
+        $dimension = $this->unitDimension($self->size_unit);
+        // Prefer the AI generic_name as the token source: it is the bare head
+        // noun ("sviestas", "vanduo"), so it survives names where the noun is
+        // not last, e.g. "sviestas su druska" (whose last word is "druska").
+        $coreToken = $this->familyCoreToken(
+            $self->np_generic ?? $self->family_generic ?? $self->family_name
+        );
+
+        [$scopeColumn, $scopeValue] = match (true) {
+            $self->subcategory_id !== null => ['np.subcategory_id', (int) $self->subcategory_id],
+            $self->category_id !== null => ['np.category_id', (int) $self->category_id],
+            default => [null, null],
+        };
+
+        $hasFamily = $self->family_id !== null;
+        $hasTextMatch = $coreToken !== null && $scopeColumn !== null;
+
+        if (! $hasFamily && ! $hasTextMatch) {
+            return [$normalizedProductId];
         }
 
-        $ids = $q->distinct()->pluck('np.id')->map(fn ($v) => (int) $v)->all();
+        $candidates = DB::table('normalized_products as np')
+            ->join('product_variants as pv', 'pv.normalized_product_id', '=', 'np.id')
+            ->leftJoin('product_families as pf', 'pf.id', '=', 'np.family_id')
+            ->where(function ($q) use ($hasFamily, $self, $hasTextMatch, $scopeColumn, $scopeValue, $coreToken): void {
+                if ($hasFamily) {
+                    $q->where('np.family_id', (int) $self->family_id);
+                }
 
-        return $ids === [] ? [$normalizedProductId] : $ids;
+                if ($hasTextMatch) {
+                    $like = '%'.$coreToken.'%';
+                    $q->orWhere(function ($q2) use ($scopeColumn, $scopeValue, $like): void {
+                        $q2->where($scopeColumn, $scopeValue)
+                            ->where(function ($q3) use ($like): void {
+                                $q3->whereRaw('LOWER(pf.family_name) LIKE ?', [$like])
+                                    ->orWhereRaw('LOWER(pf.generic_name) LIKE ?', [$like])
+                                    ->orWhereRaw('LOWER(np.generic_name) LIKE ?', [$like])
+                                    ->orWhereRaw('LOWER(np.canonical_name) LIKE ?', [$like]);
+                            });
+                    });
+                }
+            })
+            ->select(['np.id', 'pv.size_unit'])
+            ->get();
+
+        $ids = [$normalizedProductId];
+        foreach ($candidates as $row) {
+            if ($this->dimensionsCompatible($this->unitDimension($row->size_unit), $dimension)) {
+                $ids[] = (int) $row->id;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Whether two measurement dimensions can be compared. "none" (a product
+     * whose size never parsed) is a wildcard so size-less offers are not hidden,
+     * while weight vs volume stay separated for an honest comparison.
+     */
+    private function dimensionsCompatible(string $a, string $b): bool
+    {
+        return $a === $b || $a === 'none' || $b === 'none';
+    }
+
+    /**
+     * Group measurement units into comparable dimensions so litres and
+     * millilitres (or grams and kilograms) land in the same bucket.
+     */
+    private function unitDimension(mixed $unit): string
+    {
+        $u = mb_strtolower(trim((string) $unit));
+
+        return match ($u) {
+            'mg', 'g', 'kg' => 'weight',
+            'ml', 'cl', 'dl', 'l' => 'volume',
+            'vnt', 'pcs', 'pc', 'units' => 'count',
+            '' => 'none',
+            default => $u,
+        };
+    }
+
+    /**
+     * The core noun of a family name — the last token, which in Lithuanian is
+     * the head noun ("gazuotas vanduo" → "vanduo"). Returns null when there is
+     * no usable token to avoid over-broad matching.
+     */
+    private function familyCoreToken(?string $familyName): ?string
+    {
+        if ($familyName === null) {
+            return null;
+        }
+
+        $tokens = preg_split('/\s+/', mb_strtolower(trim($familyName)), -1, PREG_SPLIT_NO_EMPTY);
+        if (! $tokens) {
+            return null;
+        }
+
+        $core = (string) end($tokens);
+
+        return mb_strlen($core) >= 4 ? $core : null;
     }
 
     private function formatSize(mixed $value, mixed $unit): ?string
@@ -343,27 +478,20 @@ class ProductsController extends Controller
      */
     private function storesWithCounts(): Collection
     {
-        $latestIds = OfferSnapshot::latestIdsPerProductStoreSubquery();
-        $today = now()->toDateString();
-        $cutoff = now()->subDays(KainuCatalog::FRESHNESS_WINDOW_DAYS)->toDateString();
+        $counts = $this->catalog->baseOffersQuery()
+            ->selectRaw('LOWER(stores.name) as store_key')
+            ->selectRaw('COUNT(*) as offers_count')
+            ->groupBy(DB::raw('LOWER(stores.name)'));
 
         return DB::table('stores')
-            ->leftJoin('offer_snapshots', function ($join) use ($latestIds, $today, $cutoff): void {
-                $join->on('offer_snapshots.store_id', '=', 'stores.id')
-                    ->whereIn('offer_snapshots.id', $latestIds)
-                    ->where(function ($q) use ($today): void {
-                        $q->whereNull('offer_snapshots.valid_to')
-                            ->orWhere('offer_snapshots.valid_to', '>=', $today);
-                    })
-                    ->where('offer_snapshots.scraped_at', '>=', $cutoff);
-            })
-            ->selectRaw('stores.id, stores.name, COUNT(offer_snapshots.id) as offers_count')
-            ->groupBy('stores.id', 'stores.name')
+            ->leftJoinSub($counts, 'store_counts', 'store_counts.store_key', '=', DB::raw('LOWER(stores.name)'))
+            ->selectRaw('stores.name as store_name')
+            ->selectRaw('COALESCE(store_counts.offers_count, 0) as offers_count')
             ->orderByDesc('offers_count')
             ->get()
             ->map(fn (object $s): array => [
-                'id' => Str::lower((string) $s->name),
-                'name' => Str::title((string) $s->name),
+                'id' => Str::lower((string) $s->store_name),
+                'name' => Str::title((string) $s->store_name),
                 'count' => (int) $s->offers_count,
             ])
             ->values();

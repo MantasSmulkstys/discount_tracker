@@ -13,6 +13,13 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
+/**
+ * Shells out to the Python scraper for one store.
+ *
+ * `$tries = 1` is intentional: scrapes are weekly and a transient
+ * fetcher failure should not double up on the upstream site. The
+ * weekly cron picks it up on the next firing.
+ */
 class ScrapeStoreJob implements ShouldQueue
 {
     use Dispatchable;

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { Link, router, usePage } from '@inertiajs/vue3';
 import {
+    Bell,
     ChefHat,
     LineChart,
+    ListChecks,
     LogOut,
     Menu,
     RefreshCw,
@@ -26,7 +28,9 @@ import { reports as adminReports } from '@/routes/admin';
 import { index as adminScrape } from '@/routes/admin/scrape';
 import { index as cartIndex } from '@/routes/cart';
 import { edit as editProfile } from '@/routes/profile';
+import { index as savedCartsIndex } from '@/routes/saved-carts';
 import { index as statsIndex } from '@/routes/stats';
+import { index as subscriptionsIndex } from '@/routes/subscriptions';
 
 type AuthUser = {
     id: number;
@@ -266,6 +270,24 @@ const handleLogout = () => {
                             >
                                 <UserRound :size="15" :stroke-width="1.75" />
                                 Mano paskyra
+                            </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem as-child>
+                            <Link
+                                :href="savedCartsIndex().url"
+                                class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
+                            >
+                                <ListChecks :size="15" :stroke-width="1.75" />
+                                Mano sąrašai
+                            </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem as-child>
+                            <Link
+                                :href="subscriptionsIndex().url"
+                                class="flex cursor-pointer items-center gap-2 rounded-[8px] px-2 py-2 text-[13px] text-stone-700"
+                            >
+                                <Bell :size="15" :stroke-width="1.75" />
+                                Mano sekimai
                             </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem v-if="isAdmin" as-child>

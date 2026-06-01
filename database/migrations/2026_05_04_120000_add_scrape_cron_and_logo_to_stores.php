@@ -17,12 +17,12 @@ return new class extends Migration
         });
 
         $defaults = [
-            'iki' => ['cron' => '0 6 * * 1', 'logo' => '/storage/store-logos/iki.png'],
-            'maxima' => ['cron' => '0 6 * * 4', 'logo' => '/storage/store-logos/maxima.png'],
-            'lidl' => ['cron' => '0 6 * * 1,4', 'logo' => '/storage/store-logos/lidl.png'],
-            'rimi' => ['cron' => '0 6 * * 1,4', 'logo' => '/storage/store-logos/rimi.png'],
-            'norfa' => ['cron' => '0 6 * * 4', 'logo' => '/storage/store-logos/norfa.png'],
-            'aibe' => ['cron' => '0 6 * * 1', 'logo' => '/storage/store-logos/aibe.png'],
+            'iki' => ['cron' => '0 6 * * 1', 'logo' => '/store-logos/iki.png'],
+            'maxima' => ['cron' => '0 6 * * 4', 'logo' => '/store-logos/maxima.png'],
+            'lidl' => ['cron' => '0 6 * * 1,4', 'logo' => '/store-logos/lidl.png'],
+            'rimi' => ['cron' => '0 6 * * 1,4', 'logo' => '/store-logos/rimi.png'],
+            'norfa' => ['cron' => '0 6 * * 4', 'logo' => '/store-logos/norfa.png'],
+            'aibe' => ['cron' => '0 6 * * 1', 'logo' => '/store-logos/aibe.png'],
         ];
 
         foreach ($defaults as $slug => $values) {

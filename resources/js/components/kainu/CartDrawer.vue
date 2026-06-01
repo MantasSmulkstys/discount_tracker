@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
-import { ArrowRight, Minus, Plus, ShoppingCart, X } from 'lucide-vue-next';
-import { onMounted, onUnmounted, watch } from 'vue';
+import { Link, router, usePage } from '@inertiajs/vue3';
+import {
+    ArrowRight,
+    Check,
+    Minus,
+    Plus,
+    Save,
+    ShoppingCart,
+    X,
+} from 'lucide-vue-next';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
 import { formatPrice } from '@/lib/kainu';
+import savedCarts from '@/routes/saved-carts';
 
 const {
     items,
@@ -18,6 +27,81 @@ const {
     decrement,
     remove,
 } = useKainuCart();
+
+const page = usePage<{ auth?: { user?: { id: number } | null } }>();
+const isAuthenticated = computed(() => !!page.props.auth?.user);
+
+const isSaving = ref(false);
+const savePromptOpen = ref(false);
+const newListName = ref('');
+const saveError = ref<string | null>(null);
+
+const defaultListName = (): string => {
+    const today = new Date().toLocaleDateString('lt-LT', {
+        month: 'long',
+        day: 'numeric',
+    });
+
+    return `Sąrašas (${today})`;
+};
+
+const openSavePrompt = () => {
+    if (items.value.length === 0) {
+        return;
+    }
+    newListName.value = defaultListName();
+    saveError.value = null;
+    savePromptOpen.value = true;
+};
+
+const closeSavePrompt = () => {
+    savePromptOpen.value = false;
+    newListName.value = '';
+    saveError.value = null;
+};
+
+const submitSave = () => {
+    const name = newListName.value.trim();
+    if (name === '') {
+        saveError.value = 'Įveskite sąrašo pavadinimą.';
+
+        return;
+    }
+
+    isSaving.value = true;
+
+    const payload = {
+        name,
+        items: items.value.map((i) => ({
+            familyId: null,
+            normalizedProductId: i.product.normalizedProductId ?? null,
+            variantId: null,
+            quantity: i.qty,
+            name: i.product.name,
+            storeSlug: i.storeId ?? null,
+            priceCents:
+                i.product.bestPrice !== null
+                    ? Math.round(i.product.bestPrice * 100)
+                    : null,
+        })),
+    };
+
+    router.post(savedCarts.store().url, payload, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => {
+            closeSavePrompt();
+        },
+        onError: (errors) => {
+            saveError.value =
+                (Object.values(errors)[0] as string | undefined) ??
+                'Nepavyko išsaugoti.';
+        },
+        onFinish: () => {
+            isSaving.value = false;
+        },
+    });
+};
 
 function handleKeyDown(event: KeyboardEvent) {
     if (event.key === 'Escape' && isOpen.value) {
@@ -228,6 +312,17 @@ watch(isOpen, (open) => {
                     <span>{{ formatPrice(subtotal) }}</span>
                 </div>
 
+                <button
+                    v-if="isAuthenticated"
+                    type="button"
+                    :disabled="isSaving"
+                    class="mt-[10px] inline-flex w-full items-center justify-center gap-2 rounded-[10px] border border-kainu-border bg-white px-4 py-[10px] text-[13px] font-semibold text-stone-700 transition-colors hover:bg-kainu-surface disabled:cursor-wait disabled:opacity-60"
+                    @click="openSavePrompt"
+                >
+                    <Save :size="14" :stroke-width="2" />
+                    Išsaugoti sąrašą
+                </button>
+
                 <Link
                     href="/cart"
                     class="mt-[14px] flex w-full items-center justify-center gap-2 rounded-[10px] bg-brand-700 px-4 py-[14px] text-[14px] font-semibold text-white transition-colors hover:bg-brand-800"
@@ -238,5 +333,68 @@ watch(isOpen, (open) => {
                 </Link>
             </div>
         </aside>
+
+        <div
+            v-if="savePromptOpen"
+            class="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/40 px-4"
+            @click.self="closeSavePrompt"
+        >
+            <div
+                class="w-full max-w-md overflow-hidden rounded-[16px] bg-white shadow-2xl"
+                role="dialog"
+                aria-label="Išsaugoti sąrašą"
+            >
+                <div class="border-b border-kainu-border px-5 py-4">
+                    <h3 class="m-0 text-[16px] font-bold tracking-tight text-stone-900">
+                        Išsaugoti sąrašą
+                    </h3>
+                    <p class="mt-1 text-[12px] text-stone-500">
+                        Sąrašą galėsite vėliau atkurti į krepšelį iš
+                        „Mano sąrašai“ skilties.
+                    </p>
+                </div>
+                <div class="flex flex-col gap-3 px-5 py-4">
+                    <label
+                        for="save-list-name"
+                        class="text-[11px] font-semibold tracking-[0.04em] text-stone-500 uppercase"
+                    >
+                        Sąrašo pavadinimas
+                    </label>
+                    <input
+                        id="save-list-name"
+                        v-model="newListName"
+                        type="text"
+                        maxlength="120"
+                        autocomplete="off"
+                        placeholder="Pvz. Savaitės pirkiniai"
+                        class="rounded-[10px] border border-kainu-border bg-white px-3 py-2 text-[14px] text-stone-900 placeholder:text-stone-400 focus:border-stone-300 focus:outline-none"
+                        @keyup.enter="submitSave"
+                    />
+                    <p v-if="saveError" class="m-0 text-[12px] text-red-600">
+                        {{ saveError }}
+                    </p>
+                </div>
+                <div
+                    class="flex items-center justify-end gap-2 border-t border-kainu-border bg-kainu-surface px-5 py-3"
+                >
+                    <button
+                        type="button"
+                        class="inline-flex h-9 items-center rounded-[10px] border border-kainu-border bg-white px-3 text-[13px] font-medium text-stone-700 hover:bg-stone-50"
+                        @click="closeSavePrompt"
+                    >
+                        Atšaukti
+                    </button>
+                    <button
+                        type="button"
+                        :disabled="isSaving"
+                        class="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-brand-700 px-3 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-wait disabled:opacity-60"
+                        @click="submitSave"
+                    >
+                        <Check :size="14" :stroke-width="2" />
+                        Išsaugoti
+                    </button>
+                </div>
+            </div>
+        </div>
     </Teleport>
 </template>
