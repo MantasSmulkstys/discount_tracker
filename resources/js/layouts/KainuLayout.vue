@@ -5,11 +5,11 @@ import TopNav from '@/components/kainu/TopNav.vue';
 </script>
 
 <template>
-    <div class="min-h-screen bg-[#fafaf7] text-stone-900">
+    <div class="flex min-h-screen flex-col bg-[#fafaf7] text-stone-900">
         <ScraperNoticeBanner />
         <TopNav />
 
-        <main class="mx-auto max-w-[1280px] px-4 pb-16 sm:px-6">
+        <main class="mx-auto w-full max-w-[1280px] flex-1 px-4 pb-16 sm:px-6">
             <slot />
         </main>
 
@@ -17,9 +17,7 @@ import TopNav from '@/components/kainu/TopNav.vue';
             class="border-t border-[#e7e5e0] bg-white py-8 text-center text-[12px] text-stone-500"
         >
             <div class="mx-auto max-w-[1280px] px-4 sm:px-6">
-                <p class="m-0">
-                    Kainų seklys
-                </p>
+                <p class="m-0">Kainų seklys</p>
             </div>
         </footer>
 

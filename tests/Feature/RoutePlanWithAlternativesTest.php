@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\NormalizedProduct;
-use App\Models\ProductFamily;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
@@ -47,21 +46,23 @@ function fakeMaps(): void
     ]);
 }
 
-function seedOffer(ProductFamily $family, Store $store, float $price): array
+function seedOfferForProduct(NormalizedProduct $product, Store $store, float $price): int
 {
-    $product = NormalizedProduct::factory()->create([
-        'family_id' => $family->id,
-        'canonical_name' => 'Pienas 2.5%',
-    ]);
+    // One shared variant per product; stores differ only by offer_snapshots.
+    $variantId = DB::table('product_variants')
+        ->where('normalized_product_id', $product->id)
+        ->value('id');
 
-    $variantId = DB::table('product_variants')->insertGetId([
-        'normalized_product_id' => $product->id,
-        'variant_name' => 'default',
-        'size_unit' => 'l',
-        'size_value' => 1.0,
-        'created_at' => now(),
-        'updated_at' => now(),
-    ]);
+    if ($variantId === null) {
+        $variantId = DB::table('product_variants')->insertGetId([
+            'normalized_product_id' => $product->id,
+            'variant_name' => 'default',
+            'size_unit' => 'l',
+            'size_value' => 1.0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
 
     DB::table('offer_snapshots')->insert([
         'product_variant_id' => $variantId,
@@ -74,7 +75,7 @@ function seedOffer(ProductFamily $family, Store $store, float $price): array
         'created_at' => now(),
     ]);
 
-    return ['product' => $product, 'variantId' => $variantId];
+    return (int) $variantId;
 }
 
 test('route plan returns alternatives when items are provided', function () {
@@ -83,20 +84,25 @@ test('route plan returns alternatives when items are provided', function () {
     $maxima = Store::factory()->create(['name' => 'maxima', 'slug' => 'maxima']);
     $iki = Store::factory()->create(['name' => 'iki', 'slug' => 'iki']);
 
-    $family = ProductFamily::create([
-        'family_name' => 'Pienas',
-        'normalized_family_name' => 'pienas-'.uniqid(),
-    ]);
-    seedOffer($family, $maxima, 1.50);
-    seedOffer($family, $iki, 1.20);
+    $milk = NormalizedProduct::factory()->create(['canonical_name' => 'Pienas 2.5%']);
+    seedOfferForProduct($milk, $maxima, 1.50);
+    $ikiVariantId = seedOfferForProduct($milk, $iki, 1.20);
+
+    // The snapshot id the cheaper iki offer must report — it drives the
+    // /products/{id} detail link, which resolves by offer_snapshots.id (NOT
+    // normalized_product_id), so the wrong id silently links to another product.
+    $ikiSnapshotId = (int) DB::table('offer_snapshots')
+        ->where('product_variant_id', $ikiVariantId)
+        ->where('store_id', $iki->id)
+        ->value('id');
 
     $response = $this->postJson('/cart/route-plan', [
         'origin' => ['lat' => 54.69, 'lng' => 25.28],
         'chains' => ['maxima'],
         'mode' => 'driving',
         'items' => [[
-            'familyId' => $family->id,
-            'normalizedProductId' => null,
+            'familyId' => null,
+            'normalizedProductId' => $milk->id,
             'variantId' => null,
             'quantity' => 1,
             'storeSlug' => 'maxima',
@@ -110,10 +116,16 @@ test('route plan returns alternatives when items are provided', function () {
             'polyline',
             'totalDurationSec',
             'alternatives' => [
-                '*' => ['label', 'stores', 'totalPriceCents', 'items'],
+                '*' => ['label', 'stores', 'totalPriceCents', 'items' => [
+                    '*' => ['normalizedProductId', 'snapshotId', 'storeSlug', 'priceCents', 'name', 'image', 'fixed', 'changed'],
+                ]],
             ],
         ])
-        ->assertJsonPath('alternatives.0.items.0.priceCents', 120);
+        ->assertJsonPath('alternatives.0.items.0.priceCents', 120)
+        ->assertJsonPath('alternatives.0.items.0.snapshotId', $ikiSnapshotId)
+        ->assertJsonPath('alternatives.0.items.0.normalizedProductId', $milk->id)
+        // maxima → iki is a real change.
+        ->assertJsonPath('alternatives.0.items.0.changed', true);
 });
 
 test('route plan returns empty alternatives when no items are provided', function () {

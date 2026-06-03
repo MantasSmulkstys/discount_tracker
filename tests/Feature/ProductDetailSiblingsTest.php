@@ -13,6 +13,7 @@ function seedOfferForVariant(
     float $price,
     ?string $sizeUnit = null,
     ?float $sizeValue = null,
+    array $variantOverrides = [],
 ): int {
     $variant = DB::table('product_variants')->insertGetId([
         'normalized_product_id' => $product->id,
@@ -21,6 +22,7 @@ function seedOfferForVariant(
         'size_value' => $sizeValue,
         'created_at' => now(),
         'updated_at' => now(),
+        ...$variantOverrides,
     ]);
 
     $snapshotId = DB::table('offer_snapshots')->insertGetId([
@@ -97,6 +99,46 @@ test('product detail surfaces sibling offers from other stores in the same famil
         );
 });
 
+test('the Kiekis label prefers net quantity, then piece count, then size — never the unit price', function (
+    array $variantOverrides,
+    ?float $sizeValue,
+    ?string $sizeUnit,
+    ?string $expectedSizeLabel,
+) {
+    $product = NormalizedProduct::factory()->create(['family_id' => null]);
+    $store = Store::factory()->create(['name' => 'aibe', 'slug' => 'aibe']);
+
+    $snapshot = seedOfferForVariant($product, $store, 1.79, $sizeUnit, $sizeValue, $variantOverrides);
+
+    $this->get("/products/$snapshot")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('kainu/Products/Show')
+            ->where('offers.0.sizeLabel', $expectedSizeLabel)
+        );
+})->with([
+    // Pieces-only pack (toilet paper, sponges): show the count, not "0,3 €/vnt".
+    'piece count when there is no size' => [
+        ['package_count' => 8, 'package_unit' => 'vnt'],
+        null, null, '8 vnt',
+    ],
+    // Multipack with a net total (4×100 g): show the summed weight, not "100 g".
+    'net quantity wins over a sub-unit size' => [
+        ['package_count' => 4, 'package_unit' => 'vnt', 'net_quantity_value' => 400, 'net_quantity_unit' => 'g'],
+        100.0, 'g', '400 g',
+    ],
+    // Bin bags "60 l, 20 vnt." with no net total: the count is the quantity.
+    'piece count wins over a per-item volume' => [
+        ['package_count' => 20, 'package_unit' => 'vnt'],
+        60.0, 'l', '20 vnt',
+    ],
+    // A plain single-size product is unchanged.
+    'plain size when there is no pack' => [
+        [],
+        1.0, 'l', '1 l',
+    ],
+]);
+
 test('price history is scoped to the store the user is viewing', function () {
     $product = NormalizedProduct::factory()->create(['family_id' => null]);
     $rimi = Store::factory()->create(['name' => 'rimi', 'slug' => 'rimi']);
@@ -158,6 +200,13 @@ test('price history is scoped to the store the user is viewing', function () {
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('history', [2.49, 2.69])
+            // Each chart point carries the listing behind that week's price.
+            ->where('historyPoints.0.price', 2.49)
+            ->where('historyPoints.0.store', 'rimi')
+            ->where('historyPoints.1.price', 2.69)
+            ->where('historyPoints.1.storeName', 'Rimi')
+            ->where('historyPoints.1.sizeLabel', '1 l')
+            ->count('historyPoints', 2)
         );
 });
 

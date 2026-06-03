@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 import {
     ArrowDownRight,
     ArrowUpRight,
+    EyeOff,
     Plus,
     TriangleAlert,
 } from 'lucide-vue-next';
@@ -31,12 +32,16 @@ const props = withDefaults(defineProps<Props>(), {
     reported: false,
 });
 
-const page = usePage<{ auth?: { user?: { id: number } | null } }>();
+const page = usePage<{
+    auth?: { user?: { id: number; role?: 'admin' | 'user' } | null };
+}>();
 const isAuthenticated = computed(() => !!page.props.auth?.user);
+const isAdmin = computed(() => page.props.auth?.user?.role === 'admin');
 
 const emit = defineEmits<{
     (e: 'add-to-cart', product: KainuProduct): void;
     (e: 'toggle-report', product: KainuProduct): void;
+    (e: 'hide', product: KainuProduct): void;
 }>();
 
 const pct = computed(() => {
@@ -115,6 +120,12 @@ const handleReport = (event: MouseEvent) => {
     event.stopPropagation();
     emit('toggle-report', props.product);
 };
+
+const handleHide = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    emit('hide', props.product);
+};
 </script>
 
 <template>
@@ -137,6 +148,17 @@ const handleReport = (event: MouseEvent) => {
 
         <div class="absolute top-2 right-2 z-[1] flex items-center gap-1.5">
             <SubscribeButton :family-id="product.familyId" />
+
+            <button
+                v-if="isAdmin"
+                type="button"
+                aria-label="Paslėpti produktą"
+                title="Paslėpti produktą"
+                class="flex h-7 w-7 items-center justify-center rounded-full border border-[#e7e5e0] bg-white/90 text-stone-400 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-500"
+                @click="handleHide"
+            >
+                <EyeOff :size="13" :stroke-width="2" />
+            </button>
 
             <button
                 type="button"

@@ -4,6 +4,7 @@ import {
     ArrowDownRight,
     ArrowUpRight,
     ListChecks,
+    Loader2,
     Package2,
     PiggyBank,
     Sparkles,
@@ -11,11 +12,18 @@ import {
     TrendingDown,
     TrendingUp,
 } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import KainuLayout from '@/layouts/KainuLayout.vue';
 import { resolveStore } from '@/lib/kainu';
+import { changes as statsChanges } from '@/routes/stats';
 
 defineOptions({ layout: KainuLayout });
 
@@ -23,6 +31,7 @@ type BiggestChange = {
     id: number;
     snapshotId: number | null;
     productName: string;
+    rawName: string;
     brand: string | null;
     variant: string | null;
     image: string | null;
@@ -73,6 +82,58 @@ const hasPersonalActivity = computed(
 const topStore = computed(() =>
     props.personal?.topStoreId ? resolveStore(props.personal.topStoreId) : null,
 );
+
+type ChangeDirection = 'drops' | 'raises';
+
+const changesModalOpen = ref(false);
+const changesDirection = ref<ChangeDirection>('drops');
+const changesLoading = ref(false);
+const changesRows = ref<BiggestChange[]>([]);
+
+const changesTitle = computed(() =>
+    changesDirection.value === 'drops' ? 'Atpigimai' : 'Pabrangimai',
+);
+
+async function openChanges(direction: ChangeDirection) {
+    changesDirection.value = direction;
+    changesRows.value = [];
+    changesModalOpen.value = true;
+    changesLoading.value = true;
+
+    try {
+        const response = await fetch(
+            statsChanges.url({ query: { direction } }),
+            {
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                credentials: 'same-origin',
+            },
+        );
+
+        if (!response.ok) {
+            throw new Error('Nepavyko užkrauti pokyčių');
+        }
+
+        const payload = (await response.json()) as {
+            direction: ChangeDirection;
+            changes: BiggestChange[];
+        };
+
+        // Ignore a slow response if the user has since opened the other list.
+        if (payload.direction === changesDirection.value) {
+            changesRows.value = payload.changes;
+        }
+    } catch {
+        changesRows.value = [];
+    } finally {
+        changesLoading.value = false;
+    }
+}
+
+const formatWeek = (value: string | null): string =>
+    value ? value.slice(0, 10) : '—';
 </script>
 
 <template>
@@ -84,8 +145,8 @@ const topStore = computed(() =>
         </h1>
         <p class="mt-2 mb-0 max-w-[640px] text-[14px] text-stone-600">
             Kaip kainos kinta savaitę po savaitės. Šis puslapis surenka kainų
-            pokyčius tarp skirtingų savaičių, tad didžiausi pokyčiai matomi
-            tik tada, kai surinkta bent dviejų savaičių duomenų.
+            pokyčius tarp skirtingų savaičių, tad didžiausi pokyčiai matomi tik
+            tada, kai surinkta bent dviejų savaičių duomenų.
         </p>
     </section>
 
@@ -111,21 +172,20 @@ const topStore = computed(() =>
             <p class="m-0 text-[13px] font-medium text-stone-700">
                 Dar nesi sugeneravęs pirkinių sąrašo
             </p>
-            <p class="mx-auto mt-1 mb-0 max-w-[420px] text-[12px] text-stone-500">
-                Sudėliokite krepšelį ir spauskite „Generuoti pirkinių sąrašą“ —
-                čia atsiras santaupos, dažniausiai perkamos prekės ir mėgstamiausios
-                parduotuvės.
+            <p
+                class="mx-auto mt-1 mb-0 max-w-[420px] text-[12px] text-stone-500"
+            >
+                Sudėliokite krepšelį ir spauskite „Generuoti apsipirkimo
+                maršrutą“ — čia atsiras santaupos, dažniausiai perkamos prekės
+                ir mėgstamiausios parduotuvės.
             </p>
         </div>
 
-        <div
-            v-else
-            class="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4"
-        >
+        <div v-else class="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
                 <div class="flex items-center gap-2 text-[11px] text-stone-500">
                     <PiggyBank :size="14" :stroke-width="1.75" />
-                    <span class="uppercase tracking-[0.04em]">Sutaupiau</span>
+                    <span class="tracking-[0.04em] uppercase">Sutaupiau</span>
                 </div>
                 <div
                     class="mt-1 text-[22px] font-bold tracking-tight text-[#15803d]"
@@ -137,7 +197,7 @@ const topStore = computed(() =>
             <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
                 <div class="flex items-center gap-2 text-[11px] text-stone-500">
                     <ListChecks :size="14" :stroke-width="1.75" />
-                    <span class="uppercase tracking-[0.04em]">Sąrašai</span>
+                    <span class="tracking-[0.04em] uppercase">Sąrašai</span>
                 </div>
                 <div
                     class="mt-1 text-[22px] font-bold tracking-tight text-stone-900"
@@ -145,14 +205,15 @@ const topStore = computed(() =>
                     {{ personal.listsCount.toLocaleString('lt-LT') }}
                 </div>
                 <div class="mt-0.5 text-[11px] text-stone-500">
-                    {{ personal.totalItems.toLocaleString('lt-LT') }} prekės iš viso
+                    {{ personal.totalItems.toLocaleString('lt-LT') }} prekės iš
+                    viso
                 </div>
             </div>
 
             <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
                 <div class="flex items-center gap-2 text-[11px] text-stone-500">
                     <Sparkles :size="14" :stroke-width="1.75" />
-                    <span class="uppercase tracking-[0.04em]">Top prekė</span>
+                    <span class="tracking-[0.04em] uppercase">Top prekė</span>
                 </div>
                 <div
                     v-if="personal.topProduct"
@@ -175,7 +236,7 @@ const topStore = computed(() =>
             <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
                 <div class="flex items-center gap-2 text-[11px] text-stone-500">
                     <Store :size="14" :stroke-width="1.75" />
-                    <span class="uppercase tracking-[0.04em]">
+                    <span class="tracking-[0.04em] uppercase">
                         Mėgstama parduotuvė
                     </span>
                 </div>
@@ -197,9 +258,11 @@ const topStore = computed(() =>
         <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
             <div class="flex items-center gap-2 text-[11px] text-stone-500">
                 <Package2 :size="14" :stroke-width="1.75" />
-                <span class="uppercase tracking-[0.04em]">Produktai</span>
+                <span class="tracking-[0.04em] uppercase">Produktai</span>
             </div>
-            <div class="mt-1 text-[22px] font-bold tracking-tight text-stone-900">
+            <div
+                class="mt-1 text-[22px] font-bold tracking-tight text-stone-900"
+            >
                 {{ summary.totalProducts.toLocaleString('lt-LT') }}
             </div>
         </div>
@@ -207,32 +270,46 @@ const topStore = computed(() =>
         <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
             <div class="flex items-center gap-2 text-[11px] text-stone-500">
                 <Store :size="14" :stroke-width="1.75" />
-                <span class="uppercase tracking-[0.04em]">Parduotuvės</span>
+                <span class="tracking-[0.04em] uppercase">Parduotuvės</span>
             </div>
-            <div class="mt-1 text-[22px] font-bold tracking-tight text-stone-900">
+            <div
+                class="mt-1 text-[22px] font-bold tracking-tight text-stone-900"
+            >
                 {{ summary.totalStores }}
             </div>
         </div>
 
-        <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
+        <button
+            type="button"
+            :disabled="summary.totalDrops === 0"
+            class="rounded-[12px] border border-[#e7e5e0] bg-white p-4 text-left transition-colors enabled:cursor-pointer enabled:hover:border-[#15803d] disabled:opacity-60"
+            @click="openChanges('drops')"
+        >
             <div class="flex items-center gap-2 text-[11px] text-stone-500">
                 <TrendingDown :size="14" :stroke-width="1.75" />
-                <span class="uppercase tracking-[0.04em]">Atpigimai</span>
+                <span class="tracking-[0.04em] uppercase">Atpigimai</span>
             </div>
-            <div class="mt-1 text-[22px] font-bold tracking-tight text-[#15803d]">
+            <div
+                class="mt-1 text-[22px] font-bold tracking-tight text-[#15803d]"
+            >
                 {{ summary.totalDrops.toLocaleString('lt-LT') }}
             </div>
-        </div>
+        </button>
 
-        <div class="rounded-[12px] border border-[#e7e5e0] bg-white p-4">
+        <button
+            type="button"
+            :disabled="summary.totalRaises === 0"
+            class="rounded-[12px] border border-[#e7e5e0] bg-white p-4 text-left transition-colors enabled:cursor-pointer enabled:hover:border-red-400 disabled:opacity-60"
+            @click="openChanges('raises')"
+        >
             <div class="flex items-center gap-2 text-[11px] text-stone-500">
                 <TrendingUp :size="14" :stroke-width="1.75" />
-                <span class="uppercase tracking-[0.04em]">Pabrangimai</span>
+                <span class="tracking-[0.04em] uppercase">Pabrangimai</span>
             </div>
             <div class="mt-1 text-[22px] font-bold tracking-tight text-red-600">
                 {{ summary.totalRaises.toLocaleString('lt-LT') }}
             </div>
-        </div>
+        </button>
     </section>
 
     <section class="mt-10">
@@ -257,9 +334,11 @@ const topStore = computed(() =>
             <p class="m-0 text-[14px] font-medium text-stone-700">
                 Dar nėra kainų pokyčių duomenų
             </p>
-            <p class="mx-auto mt-1 mb-0 max-w-[420px] text-[12px] text-stone-500">
-                Kainų pokyčiai bus rodomi po antrojo skenavimo (kitą pirmadienį),
-                kai bus su kuo palyginti šios savaitės kainas.
+            <p
+                class="mx-auto mt-1 mb-0 max-w-[420px] text-[12px] text-stone-500"
+            >
+                Kainų pokyčiai bus rodomi po antrojo skenavimo (kitą
+                pirmadienį), kai bus su kuo palyginti šios savaitės kainas.
             </p>
         </div>
 
@@ -281,9 +360,7 @@ const topStore = computed(() =>
                 <span
                     class="absolute top-2 right-2 z-[1] inline-flex items-center gap-0.5 rounded-[6px] px-1.5 py-0.5 text-[11px] font-bold text-white"
                     :class="
-                        change.changePct < 0
-                            ? 'bg-[#15803d]'
-                            : 'bg-red-600'
+                        change.changePct < 0 ? 'bg-[#15803d]' : 'bg-red-600'
                     "
                 >
                     <ArrowDownRight
@@ -299,7 +376,7 @@ const topStore = computed(() =>
                     <ProductImage
                         :seed="change.id"
                         :src="change.image"
-                        :name="change.productName"
+                        :name="change.rawName"
                         :size="92"
                     />
                 </div>
@@ -313,9 +390,9 @@ const topStore = computed(() =>
                     </div>
                     <h3
                         class="m-0 line-clamp-2 text-[13px] leading-[1.3] font-medium text-stone-900"
-                        :title="change.productName"
+                        :title="change.rawName"
                     >
-                        {{ change.productName }}
+                        {{ change.rawName }}
                     </h3>
                 </div>
 
@@ -345,4 +422,133 @@ const topStore = computed(() =>
             </component>
         </div>
     </section>
+
+    <Dialog
+        :open="changesModalOpen"
+        @update:open="(v) => (changesModalOpen = v)"
+    >
+        <DialogContent class="sm:max-w-4xl">
+            <DialogHeader>
+                <DialogTitle class="flex items-center gap-2">
+                    <TrendingDown
+                        v-if="changesDirection === 'drops'"
+                        :size="18"
+                        class="text-[#15803d]"
+                    />
+                    <TrendingUp v-else :size="18" class="text-red-600" />
+                    {{ changesTitle }}
+                </DialogTitle>
+                <p class="text-sm text-slate-500">
+                    Visi kainų pokyčiai, palyginus su praėjusia savaite.
+                </p>
+            </DialogHeader>
+
+            <div
+                v-if="changesLoading"
+                class="flex items-center justify-center py-12 text-stone-400"
+            >
+                <Loader2 :size="22" class="animate-spin" />
+            </div>
+
+            <div
+                v-else-if="changesRows.length === 0"
+                class="py-12 text-center text-sm text-stone-500"
+            >
+                Nėra duomenų.
+            </div>
+
+            <div v-else class="max-h-[60vh] overflow-y-auto">
+                <table class="w-full text-left text-[13px]">
+                    <thead
+                        class="sticky top-0 bg-white text-[11px] tracking-[0.04em] text-stone-500 uppercase"
+                    >
+                        <tr class="border-b border-kainu-border">
+                            <th class="py-2 pr-2 font-medium">Prekė</th>
+                            <th class="px-2 py-2 font-medium">Parduotuvė</th>
+                            <th class="px-2 py-2 text-right font-medium">
+                                Sena
+                            </th>
+                            <th class="px-2 py-2 text-right font-medium">
+                                Nauja
+                            </th>
+                            <th class="py-2 pl-2 text-right font-medium">
+                                Pokytis
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="row in changesRows"
+                            :key="row.id"
+                            class="border-b border-stone-50 last:border-0"
+                        >
+                            <td class="max-w-[220px] py-2 pr-2">
+                                <component
+                                    :is="
+                                        row.snapshotId !== null ? Link : 'span'
+                                    "
+                                    :href="
+                                        row.snapshotId !== null
+                                            ? `/products/${row.snapshotId}`
+                                            : undefined
+                                    "
+                                    class="block truncate font-medium text-stone-800 hover:text-[#15803d]"
+                                    :title="row.rawName"
+                                >
+                                    {{ row.rawName }}
+                                </component>
+                                <span class="text-[11px] text-stone-400">
+                                    {{ formatWeek(row.weekStarting) }}
+                                </span>
+                            </td>
+                            <td class="px-2 py-2">
+                                <StoreLogo
+                                    :store-id="row.storeSlug"
+                                    :size="18"
+                                    :width="64"
+                                />
+                            </td>
+                            <td
+                                class="px-2 py-2 text-right text-stone-400 tabular-nums line-through"
+                            >
+                                {{ formatPrice(row.previousPrice) }}
+                            </td>
+                            <td
+                                class="px-2 py-2 text-right font-semibold tabular-nums"
+                                :class="
+                                    row.changePct < 0
+                                        ? 'text-[#15803d]'
+                                        : 'text-red-600'
+                                "
+                            >
+                                {{ formatPrice(row.newPrice) }}
+                            </td>
+                            <td class="py-2 pl-2 text-right">
+                                <span
+                                    class="inline-flex items-center gap-0.5 font-bold tabular-nums"
+                                    :class="
+                                        row.changePct < 0
+                                            ? 'text-[#15803d]'
+                                            : 'text-red-600'
+                                    "
+                                >
+                                    <ArrowDownRight
+                                        v-if="row.changePct < 0"
+                                        :size="12"
+                                        :stroke-width="2.5"
+                                    />
+                                    <ArrowUpRight
+                                        v-else
+                                        :size="12"
+                                        :stroke-width="2.5"
+                                    />
+                                    {{ formatPct(row.changePct) }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </DialogContent>
+    </Dialog>
 </template>

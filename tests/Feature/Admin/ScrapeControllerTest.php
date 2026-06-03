@@ -49,6 +49,39 @@ test('admin sees scrape page with store options', function () {
         );
 });
 
+test('store logo path is resolved from the file on disk regardless of stored value', function () {
+    // seedStore stores a stale "/storage/store-logos/maxima.png" value, but the
+    // real file lives at public/store-logos/maxima.png.
+    seedStore('maxima');
+
+    $this->actingAs(makeScrapeAdmin())
+        ->get('/admin/scrape')
+        ->assertInertia(fn ($page) => $page
+            ->where('stores.0.logoPath', '/store-logos/maxima.png')
+        );
+});
+
+test('store logo resolution self-heals the wrong extension', function () {
+    // The stored path assumes .png, but the real Iki logo is public/store-logos/iki.jpg.
+    seedStore('iki');
+
+    $this->actingAs(makeScrapeAdmin())
+        ->get('/admin/scrape')
+        ->assertInertia(fn ($page) => $page
+            ->where('stores.0.logoPath', '/store-logos/iki.jpg')
+        );
+});
+
+test('store without a logo file falls back to the stored path', function () {
+    seedStore('nonexistent-store');
+
+    $this->actingAs(makeScrapeAdmin())
+        ->get('/admin/scrape')
+        ->assertInertia(fn ($page) => $page
+            ->where('stores.0.logoPath', '/storage/store-logos/nonexistent-store.png')
+        );
+});
+
 test('inactive stores are hidden from the picker', function () {
     seedStore('iki');
     seedStore('lidl', active: false);

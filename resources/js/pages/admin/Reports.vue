@@ -1,19 +1,41 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
-import { Bot, Flag, Pencil, TriangleAlert } from 'lucide-vue-next';
+import { Head, router } from '@inertiajs/vue3';
+import {
+    Bot,
+    Eye,
+    EyeOff,
+    Flag,
+    History,
+    Pencil,
+    TriangleAlert,
+} from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import { unhide as unhideProduct } from '@/actions/App/Http/Controllers/AdminReportsController';
+import EditHistoryDialog from '@/components/admin/EditHistoryDialog.vue';
 import EditProductDialog from '@/components/admin/EditProductDialog.vue';
-import type {AdminProduct, CategoryNode, FamilyOption} from '@/components/admin/EditProductDialog.vue';
+import type {
+    AdminProduct,
+    CategoryNode,
+    FamilyOption,
+} from '@/components/admin/EditProductDialog.vue';
 import { Button } from '@/components/ui/button';
 
 const props = defineProps<{
     userReported: AdminProduct[];
     aiFlagged: AdminProduct[];
+    hidden: AdminProduct[];
     categories: CategoryNode[];
     families: FamilyOption[];
 }>();
 
-const activeTab = ref<'user' | 'ai'>('user');
+const activeTab = ref<'user' | 'ai' | 'hidden'>('user');
+
+function unhide(product: AdminProduct) {
+    router.delete(unhideProduct(product.id).url, {
+        preserveScroll: true,
+        preserveState: false,
+    });
+}
 const editingProduct = ref<AdminProduct | null>(null);
 
 function openEdit(product: AdminProduct) {
@@ -24,33 +46,49 @@ function closeEdit() {
     editingProduct.value = null;
 }
 
+const historyProductId = ref<number | null>(null);
+const historyEditorOpen = ref(false);
+
+function openHistory(product: AdminProduct) {
+    historyProductId.value = product.id;
+    historyEditorOpen.value = true;
+}
+
 function confidenceClass(conf: number | null): string {
     if (conf === null) {
-return 'text-stone-400';
-}
+        return 'text-stone-400';
+    }
 
     if (conf < 0.4) {
-return 'text-red-600 font-semibold';
-}
+        return 'text-red-600 font-semibold';
+    }
 
     if (conf < 0.7) {
-return 'text-amber-600 font-semibold';
-}
+        return 'text-amber-600 font-semibold';
+    }
 
     return 'text-emerald-600';
 }
 
 function confidenceLabel(conf: number | null): string {
     if (conf === null) {
-return '–';
-}
+        return '–';
+    }
 
     return (conf * 100).toFixed(0) + '%';
 }
 
-const currentList = computed(() =>
-    activeTab.value === 'user' ? props.userReported : props.aiFlagged,
-);
+const currentList = computed(() => {
+    if (activeTab.value === 'user') {
+        return props.userReported;
+    }
+
+    if (activeTab.value === 'ai') {
+        return props.aiFlagged;
+    }
+
+    return props.hidden;
+});
 </script>
 
 <template>
@@ -105,6 +143,24 @@ const currentList = computed(() =>
                         {{ aiFlagged.length }}
                     </span>
                 </button>
+                <button
+                    type="button"
+                    class="flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors"
+                    :class="
+                        activeTab === 'hidden'
+                            ? 'bg-white text-slate-950 shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                    "
+                    @click="activeTab = 'hidden'"
+                >
+                    <EyeOff :size="15" />
+                    Paslėpti produktai
+                    <span
+                        class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600"
+                    >
+                        {{ hidden.length }}
+                    </span>
+                </button>
             </div>
 
             <div
@@ -127,7 +183,7 @@ const currentList = computed(() =>
                         <img
                             v-if="product.imageUrl"
                             :src="product.imageUrl"
-                            :alt="product.canonicalName"
+                            :alt="product.rawName"
                             class="h-10 w-10 shrink-0 rounded-lg object-contain"
                         />
                         <div
@@ -140,7 +196,7 @@ const currentList = computed(() =>
                         <p
                             class="min-w-0 flex-1 truncate font-medium text-slate-900"
                         >
-                            {{ product.canonicalName }}
+                            {{ product.rawName }}
                         </p>
 
                         <span
@@ -151,13 +207,31 @@ const currentList = computed(() =>
                             {{ product.reportsCount }}
                         </span>
                         <span
-                            v-else
+                            v-else-if="activeTab === 'ai'"
                             class="shrink-0 text-sm tabular-nums"
                             :class="confidenceClass(product.aiConfidence)"
                         >
                             {{ confidenceLabel(product.aiConfidence) }}
                         </span>
+                        <span
+                            v-else
+                            class="inline-flex shrink-0 items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600"
+                        >
+                            <EyeOff :size="11" />
+                            Paslėpta
+                        </span>
 
+                        <Button
+                            v-if="activeTab === 'hidden'"
+                            variant="outline"
+                            size="sm"
+                            class="shrink-0 gap-1.5"
+                            title="Grąžinti į katalogą"
+                            @click="unhide(product)"
+                        >
+                            <Eye :size="13" />
+                            Grąžinti
+                        </Button>
                         <Button
                             variant="outline"
                             size="sm"
@@ -166,6 +240,16 @@ const currentList = computed(() =>
                         >
                             <Pencil :size="13" />
                             Redaguoti
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            class="shrink-0 gap-1.5"
+                            title="Redaguoti kainų istoriją"
+                            @click="openHistory(product)"
+                        >
+                            <History :size="13" />
+                            Istorija
                         </Button>
                     </li>
                 </ul>
@@ -177,7 +261,12 @@ const currentList = computed(() =>
         :product="editingProduct"
         :categories="categories"
         :families="families"
-        save-label="Save & Dismiss Reports"
+        save-label="Išsaugoti ir atmesti pranešimus"
         @close="closeEdit"
+    />
+
+    <EditHistoryDialog
+        v-model:open="historyEditorOpen"
+        :product-id="historyProductId"
     />
 </template>

@@ -9,6 +9,7 @@ use App\Models\OfferSnapshot;
 use App\Models\ProductReport;
 use App\Services\AdminProductPayload;
 use App\Services\KainuCatalog;
+use App\Services\RelatedProductFinder;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
@@ -25,6 +26,7 @@ class ProductsController extends Controller
     public function __construct(
         private readonly KainuCatalog $catalog,
         private readonly AdminProductPayload $adminPayload,
+        private readonly RelatedProductFinder $related,
     ) {}
 
     public function index(Request $request): Response
@@ -222,6 +224,7 @@ class ProductsController extends Controller
             'history' => $real['values'],
             'historyLabels' => $real['labels'],
             'historyDates' => $real['dates'],
+            'historyPoints' => $real['points'],
             'historyIsReal' => $real['isReal'],
             'reportedIds' => $reportedIds,
             'adminEdit' => $adminEdit,
@@ -235,7 +238,7 @@ class ProductsController extends Controller
      */
     private function latestOffersForNormalizedProduct(int $normalizedProductId): Collection
     {
-        $productIds = $this->familySiblingProductIds($normalizedProductId);
+        $productIds = $this->related->siblingProductIds($normalizedProductId);
 
         $query = DB::table('offer_snapshots')
             ->join('product_variants', 'product_variants.id', '=', 'offer_snapshots.product_variant_id')
@@ -259,6 +262,11 @@ class ProductsController extends Controller
                 'product_variants.normalized_product_id as variant_product_id',
                 'product_variants.size_value',
                 'product_variants.size_unit',
+                'product_variants.package_count',
+                'product_variants.package_unit',
+                'product_variants.net_quantity_value',
+                'product_variants.net_quantity_unit',
+                'product_variants.variant_name',
                 'normalized_products.canonical_name as product_name',
                 'stores.name as store_name',
                 'raw_offers.url as source_url',
@@ -277,7 +285,7 @@ class ProductsController extends Controller
                 'oldPrice' => $offer->old_price !== null ? (float) $offer->old_price : null,
                 'condition' => $offer->condition,
                 'url' => $offer->source_url,
-                'sizeLabel' => $this->formatSize($offer->size_value, $offer->size_unit),
+                'sizeLabel' => $this->formatQuantityLabel($offer),
                 'unitPriceLabel' => $this->formatUnitPrice((float) $offer->price, $offer->size_value, $offer->size_unit),
                 'isExactMatch' => (int) $offer->variant_product_id === $normalizedProductId,
             ])
@@ -330,137 +338,27 @@ class ProductsController extends Controller
     }
 
     /**
-     * The set of normalized products that should appear in the comparison.
+     * The "Kiekis" (quantity) label for an offer.
      *
-     * Membership = (same AI family) OR (same subcategory/category that shares
-     * the family's core noun, e.g. "vanduo" links "gazuotas vanduo" and
-     * "mineralinis vanduo"), then narrowed to the same measurement dimension
-     * (volume / weight / count) so we still compare like with like.
+     * Picks the figure a shopper actually cares about, in priority order:
+     *   1. net quantity — a multipack's total (4×100 g → "400 g"), set by the
+     *      normalizer only when summing the parts is meaningful;
+     *   2. package count — pieces, when there is no net weight/volume to sum
+     *      (toilet paper "8 vnt.", sponges "3 vnt.", bin bags "20 vnt.");
+     *   3. size — a plain single-item weight/volume ("1 l", "800 g");
+     *   4. the variant name as a last resort.
      *
-     * @return array<int, int>
+     * Crucially this never falls back to the unit price (€/kg, €/vnt): that is
+     * a price, shown separately as "Vieneto kaina", not a quantity.
      */
-    private function familySiblingProductIds(int $normalizedProductId): array
+    private function formatQuantityLabel(object $offer): ?string
     {
-        $self = DB::table('normalized_products as np')
-            ->leftJoin('product_variants as pv', 'pv.normalized_product_id', '=', 'np.id')
-            ->leftJoin('product_families as pf', 'pf.id', '=', 'np.family_id')
-            ->where('np.id', $normalizedProductId)
-            ->select([
-                'np.family_id',
-                'np.subcategory_id',
-                'np.category_id',
-                'np.generic_name as np_generic',
-                'pv.size_unit',
-                'pf.family_name',
-                'pf.generic_name as family_generic',
-            ])
-            ->first();
-
-        if (! $self) {
-            return [$normalizedProductId];
-        }
-
-        $dimension = $this->unitDimension($self->size_unit);
-        // Prefer the AI generic_name as the token source: it is the bare head
-        // noun ("sviestas", "vanduo"), so it survives names where the noun is
-        // not last, e.g. "sviestas su druska" (whose last word is "druska").
-        $coreToken = $this->familyCoreToken(
-            $self->np_generic ?? $self->family_generic ?? $self->family_name
-        );
-
-        [$scopeColumn, $scopeValue] = match (true) {
-            $self->subcategory_id !== null => ['np.subcategory_id', (int) $self->subcategory_id],
-            $self->category_id !== null => ['np.category_id', (int) $self->category_id],
-            default => [null, null],
-        };
-
-        $hasFamily = $self->family_id !== null;
-        $hasTextMatch = $coreToken !== null && $scopeColumn !== null;
-
-        if (! $hasFamily && ! $hasTextMatch) {
-            return [$normalizedProductId];
-        }
-
-        $candidates = DB::table('normalized_products as np')
-            ->join('product_variants as pv', 'pv.normalized_product_id', '=', 'np.id')
-            ->leftJoin('product_families as pf', 'pf.id', '=', 'np.family_id')
-            ->where(function ($q) use ($hasFamily, $self, $hasTextMatch, $scopeColumn, $scopeValue, $coreToken): void {
-                if ($hasFamily) {
-                    $q->where('np.family_id', (int) $self->family_id);
-                }
-
-                if ($hasTextMatch) {
-                    $like = '%'.$coreToken.'%';
-                    $q->orWhere(function ($q2) use ($scopeColumn, $scopeValue, $like): void {
-                        $q2->where($scopeColumn, $scopeValue)
-                            ->where(function ($q3) use ($like): void {
-                                $q3->whereRaw('LOWER(pf.family_name) LIKE ?', [$like])
-                                    ->orWhereRaw('LOWER(pf.generic_name) LIKE ?', [$like])
-                                    ->orWhereRaw('LOWER(np.generic_name) LIKE ?', [$like])
-                                    ->orWhereRaw('LOWER(np.canonical_name) LIKE ?', [$like]);
-                            });
-                    });
-                }
-            })
-            ->select(['np.id', 'pv.size_unit'])
-            ->get();
-
-        $ids = [$normalizedProductId];
-        foreach ($candidates as $row) {
-            if ($this->dimensionsCompatible($this->unitDimension($row->size_unit), $dimension)) {
-                $ids[] = (int) $row->id;
-            }
-        }
-
-        return array_values(array_unique($ids));
-    }
-
-    /**
-     * Whether two measurement dimensions can be compared. "none" (a product
-     * whose size never parsed) is a wildcard so size-less offers are not hidden,
-     * while weight vs volume stay separated for an honest comparison.
-     */
-    private function dimensionsCompatible(string $a, string $b): bool
-    {
-        return $a === $b || $a === 'none' || $b === 'none';
-    }
-
-    /**
-     * Group measurement units into comparable dimensions so litres and
-     * millilitres (or grams and kilograms) land in the same bucket.
-     */
-    private function unitDimension(mixed $unit): string
-    {
-        $u = mb_strtolower(trim((string) $unit));
-
-        return match ($u) {
-            'mg', 'g', 'kg' => 'weight',
-            'ml', 'cl', 'dl', 'l' => 'volume',
-            'vnt', 'pcs', 'pc', 'units' => 'count',
-            '' => 'none',
-            default => $u,
-        };
-    }
-
-    /**
-     * The core noun of a family name — the last token, which in Lithuanian is
-     * the head noun ("gazuotas vanduo" → "vanduo"). Returns null when there is
-     * no usable token to avoid over-broad matching.
-     */
-    private function familyCoreToken(?string $familyName): ?string
-    {
-        if ($familyName === null) {
-            return null;
-        }
-
-        $tokens = preg_split('/\s+/', mb_strtolower(trim($familyName)), -1, PREG_SPLIT_NO_EMPTY);
-        if (! $tokens) {
-            return null;
-        }
-
-        $core = (string) end($tokens);
-
-        return mb_strlen($core) >= 4 ? $core : null;
+        return $this->formatSize($offer->net_quantity_value ?? null, $offer->net_quantity_unit ?? null)
+            ?? $this->formatSize($offer->package_count ?? null, $offer->package_unit ?? null)
+            ?? $this->formatSize($offer->size_value ?? null, $offer->size_unit ?? null)
+            ?? (isset($offer->variant_name) && trim((string) $offer->variant_name) !== ''
+                ? trim((string) $offer->variant_name)
+                : null);
     }
 
     private function formatSize(mixed $value, mixed $unit): ?string

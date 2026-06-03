@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, ChevronDown, ChevronUp, Lock } from 'lucide-vue-next';
+import { ArrowRight, ChevronDown, ChevronUp } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { formatPrice } from '@/lib/kainu';
@@ -8,11 +8,14 @@ export type AlternativeItem = {
     familyId: number | null;
     normalizedProductId: number | null;
     variantId: number | null;
+    snapshotId: number | null;
     storeSlug: string;
     priceCents: number;
     quantity: number;
     name: string;
+    image: string | null;
     fixed: boolean;
+    changed: boolean;
 };
 
 export type Alternative = {
@@ -62,8 +65,19 @@ const durationDeltaLabel = computed(() => {
 const isCheaper = computed(() => priceDelta.value < 0);
 const isFaster = computed(() => durationDeltaMin.value < 0);
 
+// Only the lines that actually change vs the current cart (moved store or
+// swapped to a sibling product) — not every product, and not same-store
+// re-prices. That keeps the "Kodėl?" breakdown to the swaps the shopper makes.
+const changedItems = computed<AlternativeItem[]>(() =>
+    props.alternative.items.filter((i) => i.changed),
+);
+
 const visibleSwaps = computed<AlternativeItem[]>(() =>
-    props.alternative.items.filter((i) => !i.fixed).slice(0, 5),
+    changedItems.value.slice(0, 5),
+);
+
+const hiddenSwapCount = computed<number>(() =>
+    Math.max(0, changedItems.value.length - visibleSwaps.value.length),
 );
 </script>
 
@@ -79,7 +93,11 @@ const visibleSwaps = computed<AlternativeItem[]>(() =>
             </h4>
             <span class="text-[11px] text-stone-500">
                 {{ alternative.stores.length }}
-                {{ alternative.stores.length === 1 ? 'parduotuvė' : 'parduotuvių' }}
+                {{
+                    alternative.stores.length === 1
+                        ? 'parduotuvė'
+                        : 'parduotuvių'
+                }}
             </span>
         </header>
 
@@ -141,7 +159,7 @@ const visibleSwaps = computed<AlternativeItem[]>(() =>
         >
             <li
                 v-for="item in visibleSwaps"
-                :key="item.normalizedProductId ?? item.name"
+                :key="item.snapshotId ?? item.normalizedProductId ?? item.name"
                 class="flex items-center gap-2"
             >
                 <span class="min-w-0 flex-1 truncate">{{ item.name }}</span>
@@ -150,16 +168,8 @@ const visibleSwaps = computed<AlternativeItem[]>(() =>
                     {{ formatPrice(item.priceCents / 100) }}
                 </span>
             </li>
-            <li
-                v-for="item in alternative.items.filter((i) => i.fixed)"
-                :key="`fixed-${item.normalizedProductId ?? item.name}`"
-                class="flex items-center gap-2 text-stone-400"
-            >
-                <Lock :size="11" :stroke-width="2" />
-                <span class="min-w-0 flex-1 truncate">{{ item.name }}</span>
-                <span class="tabular-nums">
-                    {{ formatPrice(item.priceCents / 100) }}
-                </span>
+            <li v-if="hiddenSwapCount > 0" class="text-stone-400">
+                +{{ hiddenSwapCount }} kt.
             </li>
         </ul>
     </article>

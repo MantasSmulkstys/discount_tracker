@@ -93,7 +93,7 @@ class RoutePlanController extends Controller
      *     alternatives: list<array{
      *         label: string, stores: list<string>, totalPriceCents: int, totalDurationSec: int,
      *         priceDeltaCents: int, durationDeltaSec: int,
-     *         items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>
+     *         items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>
      *     }>
      * }  $opt
      * @return list<array<string, mixed>>

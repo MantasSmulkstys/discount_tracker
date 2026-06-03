@@ -10,6 +10,7 @@ use App\Models\ProductVariant;
 use App\Models\SavedCart;
 use App\Models\SavedCartItem;
 use App\Services\KainuCatalog;
+use App\Services\RelatedProductFinder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,7 +21,10 @@ use Inertia\Response;
 
 class SavedCartsController extends Controller
 {
-    public function __construct(private readonly KainuCatalog $catalog) {}
+    public function __construct(
+        private readonly KainuCatalog $catalog,
+        private readonly RelatedProductFinder $related,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -117,7 +121,9 @@ class SavedCartsController extends Controller
 
         $savedCart->loadMissing('items');
 
-        $items = $savedCart->items->map(fn (SavedCartItem $item): array => $this->hydrateItem($item))->values();
+        $items = $savedCart->items
+            ->map(fn (SavedCartItem $item): array => $this->hydrateItem($item, withSuggestions: true))
+            ->values();
 
         return response()->json([
             'id' => $savedCart->id,
@@ -129,15 +135,9 @@ class SavedCartsController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function hydrateItem(SavedCartItem $item): array
+    private function hydrateItem(SavedCartItem $item, bool $withSuggestions = false): array
     {
-        $current = null;
-        if ($item->product_family_id !== null) {
-            $current = $this->catalog->latestOfferForFamily(
-                $item->product_family_id,
-                $item->product_variant_id,
-            );
-        }
+        $current = $this->resolveCurrentOffer($item);
 
         $snapshotPrice = $item->snapshot_price_cents !== null
             ? round($item->snapshot_price_cents / 100, 2)
@@ -153,44 +153,110 @@ class SavedCartsController extends Controller
             'snapshotStoreSlug' => $item->snapshot_store_slug,
             'snapshotPrice' => $snapshotPrice,
             'available' => $current !== null,
-            'current' => $current === null ? null : [
-                'snapshotId' => $current['snapshot_id'],
-                'normalizedProductId' => $current['normalized_product_id'],
-                'variantId' => $current['variant_id'],
-                'name' => $current['product_name'],
-                'storeSlug' => $current['store_slug'],
-                'storeName' => $current['store_name'],
-                'price' => $current['price'],
-                'oldPrice' => $current['old_price'],
-                'unit' => $current['unit'],
-                'image' => $current['image'],
-            ],
+            'current' => $current === null ? null : $this->offerToPayload($current),
+            // Only computed on restore, and only for items that came back
+            // unavailable — the list page must stay cheap, and live items don't
+            // need a substitute.
+            'suggestions' => $withSuggestions && $current === null
+                ? $this->suggestionsForItem($item)
+                : [],
+        ];
+    }
+
+    /**
+     * Size-compatible live alternatives for an unavailable item.
+     *
+     * Prefers the same broad "related products" set the comparison page uses
+     * (same family OR same subcategory sharing the core noun) so a substitute is
+     * found even when the saved product sits in a different family than its
+     * shelf-mates. Legacy rows with only a family fall back to family matching.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function suggestionsForItem(SavedCartItem $item): array
+    {
+        if ($item->normalized_product_id !== null) {
+            $offers = $this->catalog->cheapestLiveOffers(
+                $this->related->siblingProductIds($item->normalized_product_id),
+                $item->normalized_product_id,
+            );
+        } elseif ($item->product_family_id !== null) {
+            $offers = $this->catalog->substitutesForFamily(
+                $item->product_family_id,
+                null,
+                $item->product_variant_id,
+            );
+        } else {
+            return [];
+        }
+
+        return array_map(fn (array $offer): array => $this->offerToPayload($offer), $offers);
+    }
+
+    /**
+     * The JSON shape the frontend turns straight into a cart product.
+     *
+     * @param  array<string, mixed>  $offer
+     * @return array<string, mixed>
+     */
+    private function offerToPayload(array $offer): array
+    {
+        return [
+            'snapshotId' => $offer['snapshot_id'],
+            'normalizedProductId' => $offer['normalized_product_id'],
+            'variantId' => $offer['variant_id'],
+            'name' => $offer['product_name'],
+            'storeSlug' => $offer['store_slug'],
+            'storeName' => $offer['store_name'],
+            'price' => $offer['price'],
+            'oldPrice' => $offer['old_price'],
+            'unit' => $offer['unit'],
+            'image' => $offer['image'],
         ];
     }
 
     private function totalForCart(SavedCart $cart): float
     {
+        // Only live offers count: an expired item is skipped on restore, so the
+        // headline total must reflect what the list actually costs today rather
+        // than a frozen price the shopper can no longer get.
         $total = 0.0;
         foreach ($cart->items as $item) {
-            $price = null;
-            if ($item->product_family_id !== null) {
-                $current = $this->catalog->latestOfferForFamily(
-                    $item->product_family_id,
-                    $item->product_variant_id,
-                );
-                $price = $current['price'] ?? null;
-            }
-
-            if ($price === null && $item->snapshot_price_cents !== null) {
-                $price = $item->snapshot_price_cents / 100;
-            }
-
-            if ($price !== null) {
-                $total += $price * $item->quantity;
+            $current = $this->resolveCurrentOffer($item);
+            if ($current !== null && $current['price'] !== null) {
+                $total += $current['price'] * $item->quantity;
             }
         }
 
         return round($total, 2);
+    }
+
+    /**
+     * The current cheapest fresh offer for a saved row.
+     *
+     * Resolves the *exact* product the user saved first, so a saved item is
+     * never silently swapped for a cheaper family sibling. Only rows with no
+     * stored normalized product (legacy saves) fall back to family resolution.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function resolveCurrentOffer(SavedCartItem $item): ?array
+    {
+        if ($item->normalized_product_id !== null) {
+            return $this->catalog->latestOfferForProduct(
+                $item->normalized_product_id,
+                $item->product_variant_id,
+            );
+        }
+
+        if ($item->product_family_id !== null) {
+            return $this->catalog->latestOfferForFamily(
+                $item->product_family_id,
+                $item->product_variant_id,
+            );
+        }
+
+        return null;
     }
 
     /**

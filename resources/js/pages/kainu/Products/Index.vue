@@ -10,6 +10,7 @@ import {
     X,
 } from 'lucide-vue-next';
 import { computed, onUnmounted, ref, watch } from 'vue';
+import { hide as hideProduct } from '@/actions/App/Http/Controllers/AdminReportsController';
 import {
     store as reportStore,
     destroy as reportDestroy,
@@ -265,9 +266,27 @@ function handleToggleReport(product: KainuProduct) {
     }
 }
 
+function handleHide(product: KainuProduct) {
+    router.post(
+        hideProduct(product.normalizedProductId).url,
+        {},
+        {
+            preserveScroll: true,
+            preserveState: false,
+        },
+    );
+}
+
 function storeMeta(storeId: string) {
     return resolveStore(storeId);
 }
+
+// The paginator's first and last links are always "previous" and "next"; detect
+// them by position rather than by label text, which the backend localizes
+// ("« Previous"/"Next »") and would otherwise never match.
+const isPrevLink = (idx: number): boolean => idx === 0;
+const isNextLink = (idx: number): boolean =>
+    idx === props.products.links.length - 1;
 </script>
 
 <template>
@@ -339,9 +358,7 @@ function storeMeta(storeId: string) {
                         : 'hidden lg:block'
                 "
             >
-                <div
-                    class="mb-5 flex items-center justify-between lg:hidden"
-                >
+                <div class="mb-5 flex items-center justify-between lg:hidden">
                     <h2
                         class="text-[18px] font-bold tracking-tight text-stone-900"
                     >
@@ -629,6 +646,7 @@ function storeMeta(storeId: string) {
                         :reported="reportedIds.includes(p.normalizedProductId)"
                         @add-to-cart="handleAdd"
                         @toggle-report="handleToggleReport"
+                        @hide="handleHide"
                     />
                 </div>
 
@@ -643,35 +661,35 @@ function storeMeta(storeId: string) {
                         <Link
                             v-if="link.url"
                             :href="link.url"
-                            class="inline-flex min-w-10 items-center justify-center rounded-full border px-4 py-2 text-[13px] font-medium transition-colors"
+                            class="inline-flex min-w-10 items-center justify-center gap-1 rounded-full border px-4 py-2 text-[13px] font-medium transition-colors"
                             :class="
                                 link.active
                                     ? 'border-[#15803d] bg-[#15803d] text-white'
                                     : 'border-[#e7e5e0] bg-white text-stone-700 hover:bg-stone-50'
                             "
                         >
-                            <ChevronLeft
-                                v-if="link.label === 'Previous'"
-                                :size="14"
-                            />
-                            <ChevronRight
-                                v-else-if="link.label === 'Next'"
-                                :size="14"
-                            />
+                            <template v-if="isPrevLink(idx)">
+                                <ChevronLeft :size="14" />
+                                Ankstesnis
+                            </template>
+                            <template v-else-if="isNextLink(idx)">
+                                Sekantis
+                                <ChevronRight :size="14" />
+                            </template>
                             <span v-else>{{ link.label }}</span>
                         </Link>
                         <span
                             v-else
-                            class="inline-flex min-w-10 items-center justify-center rounded-full border border-stone-200 bg-stone-100 px-4 py-2 text-[13px] text-stone-400"
+                            class="inline-flex min-w-10 items-center justify-center gap-1 rounded-full border border-stone-200 bg-stone-100 px-4 py-2 text-[13px] text-stone-400"
                         >
-                            <ChevronLeft
-                                v-if="link.label === 'Previous'"
-                                :size="14"
-                            />
-                            <ChevronRight
-                                v-else-if="link.label === 'Next'"
-                                :size="14"
-                            />
+                            <template v-if="isPrevLink(idx)">
+                                <ChevronLeft :size="14" />
+                                Ankstesnis
+                            </template>
+                            <template v-else-if="isNextLink(idx)">
+                                Sekantis
+                                <ChevronRight :size="14" />
+                            </template>
                             <span v-else>{{ link.label }}</span>
                         </span>
                     </template>

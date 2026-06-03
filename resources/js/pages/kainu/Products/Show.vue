@@ -17,6 +17,7 @@ import {
     destroy as reportDestroy,
     store as reportStore,
 } from '@/actions/App/Http/Controllers/ProductReportController';
+import EditHistoryDialog from '@/components/admin/EditHistoryDialog.vue';
 import EditProductDialog from '@/components/admin/EditProductDialog.vue';
 import type {
     AdminProduct,
@@ -26,6 +27,7 @@ import type {
 import ConditionBadge from '@/components/kainu/ConditionBadge.vue';
 import DiscountBadge from '@/components/kainu/DiscountBadge.vue';
 import PriceHistoryChart from '@/components/kainu/PriceHistoryChart.vue';
+import type { HistoryPoint } from '@/components/kainu/PriceHistoryChart.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
@@ -54,6 +56,7 @@ const props = defineProps<{
     history: number[];
     historyLabels: string[];
     historyDates: string[];
+    historyPoints: HistoryPoint[];
     historyIsReal: boolean;
     reportedIds: number[];
     adminEdit: AdminProduct | null;
@@ -71,6 +74,13 @@ function openAdminEdit() {
 
 function closeAdminEdit() {
     editingProduct.value = null;
+}
+
+const historyEditorOpen = ref(false);
+
+function onHistorySaved() {
+    // Editing past snapshots changes the chart above, so pull fresh data.
+    router.reload();
 }
 
 const { addToCart, openDrawer } = useKainuCart();
@@ -451,7 +461,7 @@ function decrement() {
 
         <section class="mb-9">
             <div class="rounded-[16px] border border-[#e7e5e0] bg-white p-6">
-                <div class="mb-[18px] flex items-baseline justify-between">
+                <div class="mb-[18px] flex items-baseline justify-between gap-3">
                     <div>
                         <h2
                             class="m-0 text-[18px] font-semibold tracking-tight text-stone-900"
@@ -468,6 +478,15 @@ function decrement() {
                             – {{ historyLabels[historyLabels.length - 1] }})
                         </p>
                     </div>
+                    <button
+                        v-if="adminEdit"
+                        type="button"
+                        class="inline-flex shrink-0 items-center gap-1 self-start rounded-md border border-stone-200 bg-white px-2 py-1 text-[12px] font-medium text-stone-600 hover:border-stone-300 hover:text-stone-900"
+                        @click="historyEditorOpen = true"
+                    >
+                        <Pencil :size="12" />
+                        Redaguoti
+                    </button>
                 </div>
 
                 <PriceHistoryChart
@@ -475,6 +494,7 @@ function decrement() {
                     :values="history"
                     :labels="historyLabels"
                     :dates="historyDates"
+                    :points="historyPoints"
                 />
                 <div
                     v-else
@@ -613,6 +633,13 @@ function decrement() {
             :categories="adminCategories"
             :families="adminFamilies ?? []"
             @close="closeAdminEdit"
+        />
+
+        <EditHistoryDialog
+            v-if="adminEdit"
+            v-model:open="historyEditorOpen"
+            :product-id="adminEdit.id"
+            @saved="onHistorySaved"
         />
     </div>
 </template>

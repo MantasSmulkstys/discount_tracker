@@ -42,6 +42,7 @@ Route::middleware('auth')->group(function () {
         ->name('cart.route-plan');
 
     Route::get('/statistika', StatsController::class)->name('stats.index');
+    Route::get('/statistika/pokyciai', [StatsController::class, 'changes'])->name('stats.changes');
 
     Route::get('/sarasai', [SavedCartsController::class, 'index'])->name('saved-carts.index');
     Route::post('/sarasai', [SavedCartsController::class, 'store'])->name('saved-carts.store');
@@ -73,7 +74,11 @@ Route::middleware('guest')->prefix('auth/google')->name('auth.google.')->group(f
 
 Route::middleware(['auth', 'verified', 'admin'])->group(function () {
     Route::get('admin/reports', [AdminReportsController::class, 'index'])->name('admin.reports');
+    Route::get('admin/products/{normalizedProduct}/history', [AdminReportsController::class, 'history'])->name('admin.products.history');
+    Route::patch('admin/products/{normalizedProduct}/history', [AdminReportsController::class, 'historyUpdate'])->name('admin.products.history.update');
     Route::patch('admin/products/{normalizedProduct}', [AdminReportsController::class, 'update'])->name('admin.products.update');
+    Route::post('admin/products/{normalizedProduct}/hide', [AdminReportsController::class, 'hide'])->name('admin.products.hide');
+    Route::delete('admin/products/{normalizedProduct}/hide', [AdminReportsController::class, 'unhide'])->name('admin.products.unhide');
 
     Route::get('admin/scrape', [ScrapeController::class, 'index'])->name('admin.scrape.index');
     Route::post('admin/scrape/run', [ScrapeController::class, 'runStore'])->name('admin.scrape.run');

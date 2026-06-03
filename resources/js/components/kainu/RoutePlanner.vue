@@ -46,11 +46,14 @@ type AlternativeItem = {
     familyId: number | null;
     normalizedProductId: number | null;
     variantId: number | null;
+    snapshotId: number | null;
     storeSlug: string;
     priceCents: number;
     quantity: number;
     name: string;
+    image: string | null;
     fixed: boolean;
+    changed: boolean;
 };
 
 type Alternative = {
@@ -78,18 +81,23 @@ const props = defineProps<{
     hasMapsKey: boolean;
     apiKey: string | null;
     items?: CartItemPayload[];
+    initialOrigin?: LatLng | null;
+    initialOriginLabel?: string;
+    initialMode?: TravelMode;
 }>();
 
 const emit = defineEmits<{
     (e: 'plan', plan: RoutePlan | null): void;
     (e: 'origin', origin: LatLng | null): void;
+    (e: 'origin-label', label: string): void;
+    (e: 'mode', mode: TravelMode): void;
 }>();
 
 type Status = 'idle' | 'locating' | 'planning' | 'ready' | 'error';
 
 const status = ref<Status>('idle');
 const errorMessage = ref<string | null>(null);
-const mode = ref<TravelMode>('driving');
+const mode = ref<TravelMode>(props.initialMode ?? 'driving');
 const origin = ref<LatLng | null>(null);
 const originLabel = ref<string>('');
 const plan = ref<RoutePlan | null>(null);
@@ -168,6 +176,7 @@ async function ensureAutocomplete(): Promise<void> {
         originLabel.value =
             place?.formatted_address ?? place?.name ?? originLabel.value;
         emit('origin', next);
+        emit('origin-label', originLabel.value);
         void fetchPlan(next, mode.value);
     });
 }
@@ -229,6 +238,7 @@ const useMyLocation = (): void => {
             origin.value = next;
             originLabel.value = 'Mano vieta';
             emit('origin', next);
+            emit('origin-label', originLabel.value);
             void fetchPlan(next, mode.value);
         },
         (err) => {
@@ -248,28 +258,50 @@ const switchMode = async (next: TravelMode): Promise<void> => {
     }
 
     mode.value = next;
+    emit('mode', next);
 
     if (origin.value) {
         await fetchPlan(origin.value, next);
     }
 };
 
-watch(
-    () => props.chains.join('|'),
-    () => {
+// Re-plan automatically whenever the cart changes — both the set of stores
+// (chains) and the items themselves (quantities, store assignment, products
+// added/removed), so the user never has to re-trigger generation by hand.
+const itemsSignature = computed(() =>
+    (props.items ?? [])
+        .map(
+            (i) =>
+                `${i.normalizedProductId ?? i.familyId ?? '?'}:${i.storeSlug ?? '?'}:${i.quantity}`,
+        )
+        .join('|'),
+);
+
+watch([() => props.chains.join('|'), itemsSignature], () => {
+    if (props.chains.length === 0) {
         if (plan.value) {
             plan.value = null;
             emit('plan', null);
         }
+        status.value = 'idle';
 
-        if (origin.value) {
-            void fetchPlan(origin.value, mode.value);
-        }
-    },
-);
+        return;
+    }
+
+    if (origin.value) {
+        void fetchPlan(origin.value, mode.value);
+    }
+});
 
 onMounted(() => {
     void ensureAutocomplete();
+
+    // Restore a previously generated route after navigating back to the cart.
+    if (props.initialOrigin) {
+        origin.value = props.initialOrigin;
+        originLabel.value = props.initialOriginLabel || 'Išsaugota vieta';
+        void fetchPlan(props.initialOrigin, mode.value);
+    }
 });
 
 onBeforeUnmount(() => {

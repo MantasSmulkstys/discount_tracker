@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Services\KainuCatalog;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -14,6 +16,13 @@ use Inertia\Response;
 class StatsController extends Controller
 {
     private const CHANGES_LIMIT = 5;
+
+    /**
+     * Week-over-week swings beyond this magnitude are hidden from the
+     * "biggest changes" feed — they are almost always a promotion starting or
+     * ending rather than a genuine shelf-price move, and dominate the list.
+     */
+    private const MAX_CHANGE_PCT = 100;
 
     public function __construct(private readonly KainuCatalog $catalog) {}
 
@@ -29,6 +38,25 @@ class StatsController extends Controller
     }
 
     /**
+     * Full list of price drops or raises behind the summary counts, fetched on
+     * demand when the user opens the Atpigimai / Pabrangimai modal.
+     */
+    public function changes(Request $request): JsonResponse
+    {
+        $direction = (string) $request->string('direction');
+        if (! in_array($direction, ['drops', 'raises'], true)) {
+            abort(404);
+        }
+
+        $rows = $this->selectChangeColumns($this->changesQuery($direction))->get();
+
+        return response()->json([
+            'direction' => $direction,
+            'changes' => $rows->map(fn ($row) => $this->mapChangeRow($row))->all(),
+        ]);
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     private function biggestChanges(): array
@@ -38,20 +66,60 @@ class StatsController extends Controller
         $latestIds = DB::table('price_changes')
             ->whereNotNull('change_pct')
             ->where('change_pct', '!=', 0)
+            ->whereRaw('ABS(change_pct) <= ?', [self::MAX_CHANGE_PCT])
             ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
+            ->tap(fn ($q) => $this->whereBaselineExists($q))
             ->groupBy('product_variant_id', 'store_id')
             ->selectRaw('MAX(id) as id');
 
-        $rows = DB::table('price_changes')
+        $query = DB::table('price_changes')
             ->join('product_variants', 'product_variants.id', '=', 'price_changes.product_variant_id')
             ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
             ->join('stores', 'stores.id', '=', 'price_changes.store_id')
             ->leftJoin('offer_snapshots as os_change', 'os_change.id', '=', 'price_changes.snapshot_id')
             ->leftJoin('raw_offers as ro_change', 'ro_change.id', '=', 'os_change.raw_offer_id')
             ->whereIn('price_changes.id', $latestIds)
+            ->whereRaw('ABS(price_changes.change_pct) <= ?', [self::MAX_CHANGE_PCT])
             ->when($floor !== null, fn ($q) => $q->where('price_changes.changed_at', '>=', $floor))
             ->orderByRaw('ABS(price_changes.change_pct) DESC')
-            ->limit(self::CHANGES_LIMIT)
+            ->limit(self::CHANGES_LIMIT);
+
+        return $this->selectChangeColumns($query)
+            ->get()
+            ->map(fn ($row) => $this->mapChangeRow($row))
+            ->all();
+    }
+
+    /**
+     * Every price change in one direction ("drops" or "raises"), newest and
+     * biggest first. Matches the totalDrops / totalRaises summary counts (same
+     * baseline guard and floor, no top-N or ±100 % trimming), so the modal's
+     * row count lines up with the headline figure.
+     */
+    private function changesQuery(string $direction): Builder
+    {
+        $floor = $this->catalog->visibilityFloor();
+
+        return DB::table('price_changes')
+            ->join('product_variants', 'product_variants.id', '=', 'price_changes.product_variant_id')
+            ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
+            ->join('stores', 'stores.id', '=', 'price_changes.store_id')
+            ->leftJoin('offer_snapshots as os_change', 'os_change.id', '=', 'price_changes.snapshot_id')
+            ->leftJoin('raw_offers as ro_change', 'ro_change.id', '=', 'os_change.raw_offer_id')
+            ->whereNotNull('price_changes.change_pct')
+            ->where('price_changes.change_pct', $direction === 'drops' ? '<' : '>', 0)
+            ->when($floor !== null, fn ($q) => $q->where('price_changes.changed_at', '>=', $floor))
+            ->tap(fn ($q) => $this->whereBaselineExists($q))
+            ->orderByDesc('price_changes.week_starting')
+            ->orderByRaw('ABS(price_changes.change_pct) DESC');
+    }
+
+    /**
+     * @param  Builder  $query
+     */
+    private function selectChangeColumns($query): Builder
+    {
+        return $query
             ->select([
                 'price_changes.id',
                 'price_changes.previous_price',
@@ -60,17 +128,24 @@ class StatsController extends Controller
                 'price_changes.week_starting',
                 'price_changes.snapshot_id',
                 'normalized_products.canonical_name as product_name',
+                'ro_change.name as raw_name',
                 'normalized_products.brand',
                 'product_variants.variant_name',
                 'stores.name as store_name',
             ])
-            ->selectRaw('COALESCE(ro_change.image, normalized_products.image_url) AS image_url')
-            ->get();
+            ->selectRaw('COALESCE(ro_change.image, normalized_products.image_url) AS image_url');
+    }
 
-        return $rows->map(fn ($row) => [
+    /**
+     * @return array<string, mixed>
+     */
+    private function mapChangeRow(object $row): array
+    {
+        return [
             'id' => (int) $row->id,
             'snapshotId' => $row->snapshot_id !== null ? (int) $row->snapshot_id : null,
             'productName' => (string) $row->product_name,
+            'rawName' => filled($row->raw_name ?? null) ? (string) $row->raw_name : (string) $row->product_name,
             'brand' => $row->brand ?? null,
             'variant' => $row->variant_name ?? null,
             'image' => $row->image_url ?? null,
@@ -80,7 +155,7 @@ class StatsController extends Controller
             'weekStarting' => $row->week_starting,
             'storeName' => Str::title((string) $row->store_name),
             'storeSlug' => Str::slug((string) $row->store_name),
-        ])->all();
+        ];
     }
 
     /**
@@ -100,16 +175,44 @@ class StatsController extends Controller
                 ->whereNotNull('change_pct')
                 ->where('change_pct', '!=', 0)
                 ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
+                ->tap(fn ($q) => $this->whereBaselineExists($q))
                 ->count(),
             'totalDrops' => (int) DB::table('price_changes')
                 ->where('change_pct', '<', 0)
                 ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
+                ->tap(fn ($q) => $this->whereBaselineExists($q))
                 ->count(),
             'totalRaises' => (int) DB::table('price_changes')
                 ->where('change_pct', '>', 0)
                 ->when($floor !== null, fn ($q) => $q->where('changed_at', '>=', $floor))
+                ->tap(fn ($q) => $this->whereBaselineExists($q))
                 ->count(),
         ];
+    }
+
+    /**
+     * Keep only findings whose "previous price" data point still exists.
+     *
+     * A price_changes row stores its baseline as a literal `previous_price`
+     * plus a `snapshot_id` pointing at the *new* (current) snapshot — never at
+     * the prior one it was compared against. So when an admin deletes a
+     * product's earlier price history, the finding is left orphaned: it keeps
+     * claiming a change against a price that no longer has a snapshot. This
+     * guard hides such findings by requiring a matching earlier snapshot to
+     * still exist for the same variant+store.
+     *
+     * @param  Builder  $query
+     */
+    private function whereBaselineExists($query): void
+    {
+        $query->whereExists(function ($sub): void {
+            $sub->select(DB::raw(1))
+                ->from('offer_snapshots as os_base')
+                ->whereColumn('os_base.product_variant_id', 'price_changes.product_variant_id')
+                ->whereColumn('os_base.store_id', 'price_changes.store_id')
+                ->whereColumn('os_base.week_starting', '<', 'price_changes.week_starting')
+                ->whereColumn('os_base.price', 'price_changes.previous_price');
+        });
     }
 
     /**

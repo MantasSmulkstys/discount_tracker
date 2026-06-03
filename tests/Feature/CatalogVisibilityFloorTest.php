@@ -166,6 +166,18 @@ test('floor hides pre-floor entries from the stats page', function () {
 
     foreach ([[$preFloor, '2026-05-10 12:00:00', -40.0], [$postFloor, '2026-05-13 09:00:00', -10.0]] as [$snapshotId, $changedAt, $pct]) {
         $row = DB::table('offer_snapshots')->where('id', $snapshotId)->first();
+
+        // The prior-week snapshot the finding was compared against. Scraped
+        // pre-floor so it backs the change without inflating totalSnapshots.
+        DB::table('offer_snapshots')->insert([
+            'product_variant_id' => $row->product_variant_id,
+            'store_id' => $row->store_id,
+            'week_starting' => Carbon::parse($changedAt)->subWeek()->startOfWeek()->toDateString(),
+            'price' => 2.00,
+            'scraped_at' => Carbon::parse($changedAt)->subWeek(),
+            'created_at' => now(),
+        ]);
+
         DB::table('price_changes')->insert([
             'product_variant_id' => $row->product_variant_id,
             'store_id' => $row->store_id,

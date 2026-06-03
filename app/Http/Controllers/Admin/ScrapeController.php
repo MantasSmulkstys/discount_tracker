@@ -77,7 +77,7 @@ class ScrapeController extends Controller
                 'id' => $s->id,
                 'slug' => $s->slug,
                 'name' => Str::title($s->name),
-                'logoPath' => $s->logo_path,
+                'logoPath' => Store::resolveLogoPath($s->slug) ?? $s->logo_path,
                 'scrapeCron' => $s->scrape_cron,
             ])
             ->all();

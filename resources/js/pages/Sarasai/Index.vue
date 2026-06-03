@@ -5,13 +5,22 @@ import {
     ListChecks,
     Loader2,
     Pencil,
+    Plus,
     RefreshCw,
     ShoppingCart,
     Trash2,
     X,
 } from 'lucide-vue-next';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { useKainuCart } from '@/composables/useKainuCart';
 import KainuLayout from '@/layouts/KainuLayout.vue';
 import { formatPrice } from '@/lib/kainu';
@@ -19,6 +28,19 @@ import savedCarts from '@/routes/saved-carts';
 import type { KainuProduct } from '@/types/kainu';
 
 defineOptions({ layout: KainuLayout });
+
+type Offer = {
+    snapshotId: number;
+    normalizedProductId: number;
+    variantId: number;
+    name: string;
+    storeSlug: string;
+    storeName: string;
+    price: number;
+    oldPrice: number | null;
+    unit: string | null;
+    image: string | null;
+};
 
 type SavedCartItem = {
     id: number;
@@ -30,18 +52,8 @@ type SavedCartItem = {
     snapshotStoreSlug: string | null;
     snapshotPrice: number | null;
     available: boolean;
-    current: null | {
-        snapshotId: number;
-        normalizedProductId: number;
-        variantId: number;
-        name: string;
-        storeSlug: string;
-        storeName: string;
-        price: number;
-        oldPrice: number | null;
-        unit: string | null;
-        image: string | null;
-    };
+    current: Offer | null;
+    suggestions: Offer[];
 };
 
 type SavedCartCard = {
@@ -58,17 +70,77 @@ defineProps<{
     carts: SavedCartCard[];
 }>();
 
-const { addToCart, openDrawer, clear: clearCart } = useKainuCart();
+const { addToCart, openDrawer, clear: clearCart, totalCount } = useKainuCart();
 
 const restoringId = ref<number | null>(null);
 const editingId = ref<number | null>(null);
 const editingName = ref<string>('');
 const deletingId = ref<number | null>(null);
 
+// Items whose discount has expired since the list was saved: they are left out
+// of the restored cart (no live price) and surfaced here with same-family
+// substitutes the user can accept or decline, instead of silently shopping a
+// deal that no longer exists.
+const skippedItems = ref<SavedCartItem[]>([]);
+const skippedDialogOpen = ref(false);
+
+// Suggestions the user dismissed (keyed `${itemId}:${snapshotId}`) and items
+// already resolved by accepting a substitute — both hidden from the dialog.
+const declinedSuggestions = ref<Set<string>>(new Set());
+const resolvedItemIds = ref<Set<number>>(new Set());
+
+const suggestionKey = (itemId: number, offer: Offer): string =>
+    `${itemId}:${offer.snapshotId}`;
+
+const visibleSuggestions = (item: SavedCartItem): Offer[] =>
+    item.suggestions.filter(
+        (s) => !declinedSuggestions.value.has(suggestionKey(item.id, s)),
+    );
+
+const pendingSkipped = computed(() =>
+    skippedItems.value.filter((i) => !resolvedItemIds.value.has(i.id)),
+);
+
+const toCartProduct = (offer: Offer): KainuProduct => ({
+    id: offer.snapshotId,
+    normalizedProductId: offer.normalizedProductId,
+    name: offer.name,
+    normalizedName: null,
+    brand: null,
+    category: 'all',
+    unit: offer.unit,
+    emoji: '',
+    bestPrice: offer.price,
+    oldPrice: offer.oldPrice,
+    discount: null,
+    condition: null,
+    bestStore: offer.storeSlug,
+    bestStoreName: offer.storeName,
+    image: offer.image,
+    url: null,
+    validDates: null,
+    validFrom: null,
+    validTo: null,
+    loyaltyCard: false,
+    scrapedAt: null,
+});
+
+const acceptSuggestion = (item: SavedCartItem, offer: Offer): void => {
+    addToCart(toCartProduct(offer), item.quantity, offer.storeSlug);
+    resolvedItemIds.value = new Set(resolvedItemIds.value).add(item.id);
+};
+
+const declineSuggestion = (item: SavedCartItem, offer: Offer): void => {
+    const next = new Set(declinedSuggestions.value);
+    next.add(suggestionKey(item.id, offer));
+    declinedSuggestions.value = next;
+};
+
 const formatDate = (iso: string | null): string => {
     if (!iso) {
         return '';
     }
+
     const d = new Date(iso);
 
     return d.toLocaleDateString('lt-LT', {
@@ -80,6 +152,7 @@ const formatDate = (iso: string | null): string => {
 
 const handleRestore = async (cart: SavedCartCard) => {
     restoringId.value = cart.id;
+
     try {
         const response = await fetch(
             savedCarts.restore({ savedCart: cart.id }).url,
@@ -90,11 +163,9 @@ const handleRestore = async (cart: SavedCartCard) => {
                     'Content-Type': 'application/json',
                     'X-Requested-With': 'XMLHttpRequest',
                     'X-CSRF-TOKEN':
-                        document
-                            .querySelector<HTMLMetaElement>(
-                                'meta[name="csrf-token"]',
-                            )
-                            ?.content ?? '',
+                        document.querySelector<HTMLMetaElement>(
+                            'meta[name="csrf-token"]',
+                        )?.content ?? '',
                 },
                 credentials: 'same-origin',
             },
@@ -109,48 +180,46 @@ const handleRestore = async (cart: SavedCartCard) => {
         };
 
         clearCart();
+        declinedSuggestions.value = new Set();
+        resolvedItemIds.value = new Set();
+
+        // Only items with a live offer are added — a stale snapshot price must
+        // never masquerade as a current one. Expired items are collected so we
+        // can tell the user and offer them substitutes.
+        const skipped: SavedCartItem[] = [];
 
         for (const item of payload.items) {
-            const product: KainuProduct = {
-                id: item.current?.snapshotId ?? item.id,
-                normalizedProductId:
-                    item.current?.normalizedProductId ??
-                    item.normalizedProductId ??
-                    0,
-                name: item.current?.name ?? item.snapshotName,
-                normalizedName: null,
-                brand: null,
-                category: 'all',
-                unit: item.current?.unit ?? null,
-                emoji: '',
-                bestPrice:
-                    item.current?.price ?? item.snapshotPrice ?? null,
-                oldPrice: item.current?.oldPrice ?? null,
-                discount: null,
-                condition: null,
-                bestStore:
-                    item.current?.storeSlug ??
-                    item.snapshotStoreSlug ??
-                    'other',
-                bestStoreName:
-                    item.current?.storeName ??
-                    (item.snapshotStoreSlug ?? 'Kita'),
-                image: item.current?.image ?? null,
-                url: null,
-                validDates: null,
-                validFrom: null,
-                validTo: null,
-                loyaltyCard: false,
-                scrapedAt: null,
-            };
+            if (!item.available || !item.current) {
+                skipped.push(item);
 
-            addToCart(product, item.quantity, product.bestStore);
+                continue;
+            }
+
+            addToCart(
+                toCartProduct(item.current),
+                item.quantity,
+                item.current.storeSlug,
+            );
         }
 
-        openDrawer();
+        const addedCount = payload.items.length - skipped.length;
+        skippedItems.value = skipped;
+
+        if (skipped.length > 0) {
+            // Let the user deal with the expired items first; they can open the
+            // cart from the dialog once they've had a look.
+            skippedDialogOpen.value = true;
+        } else if (addedCount > 0) {
+            openDrawer();
+        }
     } finally {
         restoringId.value = null;
     }
+};
+
+const viewRestoredCart = (): void => {
+    skippedDialogOpen.value = false;
+    openDrawer();
 };
 
 const startEdit = (cart: SavedCartCard) => {
@@ -165,6 +234,7 @@ const cancelEdit = () => {
 
 const submitEdit = (cart: SavedCartCard) => {
     const name = editingName.value.trim();
+
     if (name === '') {
         return;
     }
@@ -308,11 +378,7 @@ const doDelete = (cart: SavedCartCard) => {
                             :stroke-width="2"
                             class="animate-spin"
                         />
-                        <RefreshCw
-                            v-else
-                            :size="14"
-                            :stroke-width="2"
-                        />
+                        <RefreshCw v-else :size="14" :stroke-width="2" />
                         Atkurti
                     </button>
                     <button
@@ -403,9 +469,7 @@ const doDelete = (cart: SavedCartCard) => {
                     >
                         <template v-if="item.current">
                             {{
-                                formatPrice(
-                                    item.current.price * item.quantity,
-                                )
+                                formatPrice(item.current.price * item.quantity)
                             }}
                         </template>
                         <template v-else-if="item.snapshotPrice !== null">
@@ -435,4 +499,115 @@ const doDelete = (cart: SavedCartCard) => {
             Įkeliamas krepšelis…
         </span>
     </div>
+
+    <Dialog
+        :open="skippedDialogOpen"
+        @update:open="(v) => (skippedDialogOpen = v)"
+    >
+        <DialogContent class="max-w-lg">
+            <DialogHeader>
+                <DialogTitle>Kai kurios prekės nebegalioja</DialogTitle>
+                <p class="text-sm text-slate-500">
+                    Šių prekių akcijos pasibaigė, todėl jos nebuvo įdėtos į
+                    krepšelį. Pasirinkite pakaitalą arba jį atmeskite.
+                </p>
+            </DialogHeader>
+
+            <ul
+                v-if="pendingSkipped.length > 0"
+                class="max-h-80 space-y-3 overflow-y-auto py-1"
+            >
+                <li
+                    v-for="item in pendingSkipped"
+                    :key="item.id"
+                    class="rounded-xl border border-stone-100 p-3"
+                >
+                    <div
+                        class="mb-2 min-w-0 truncate text-sm font-medium text-stone-800"
+                    >
+                        {{ item.snapshotName }}
+                        <span class="text-stone-400"
+                            >× {{ item.quantity }}</span
+                        >
+                    </div>
+
+                    <div
+                        v-if="visibleSuggestions(item).length > 0"
+                        class="space-y-1.5"
+                    >
+                        <div
+                            v-for="offer in visibleSuggestions(item)"
+                            :key="offer.snapshotId"
+                            class="flex items-center gap-2.5 rounded-lg bg-stone-50 px-2.5 py-1.5"
+                        >
+                            <img
+                                v-if="offer.image"
+                                :src="offer.image"
+                                :alt="offer.name"
+                                class="h-9 w-9 shrink-0 rounded-md object-contain"
+                            />
+                            <div class="min-w-0 flex-1">
+                                <div
+                                    class="truncate text-xs font-medium text-stone-800"
+                                >
+                                    {{ offer.name }}
+                                </div>
+                                <div
+                                    class="mt-0.5 flex items-center gap-1.5 text-[11px] text-stone-500"
+                                >
+                                    <StoreLogo
+                                        :store-id="offer.storeSlug"
+                                        :size="14"
+                                        :width="44"
+                                    />
+                                    <span v-if="offer.unit"
+                                        >· {{ offer.unit }}</span
+                                    >
+                                </div>
+                            </div>
+                            <span
+                                class="shrink-0 text-xs font-bold text-stone-900 tabular-nums"
+                            >
+                                {{ formatPrice(offer.price) }}
+                            </span>
+                            <button
+                                type="button"
+                                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-brand-700 text-white transition-colors hover:bg-brand-800"
+                                aria-label="Pridėti į krepšelį"
+                                title="Pridėti į krepšelį"
+                                @click="acceptSuggestion(item, offer)"
+                            >
+                                <Plus :size="14" :stroke-width="2" />
+                            </button>
+                            <button
+                                type="button"
+                                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-stone-200 bg-white text-stone-500 transition-colors hover:bg-stone-100"
+                                aria-label="Atmesti"
+                                title="Atmesti"
+                                @click="declineSuggestion(item, offer)"
+                            >
+                                <X :size="14" :stroke-width="2" />
+                            </button>
+                        </div>
+                    </div>
+                    <p v-else class="text-xs text-stone-400">
+                        Pakaitalų nerasta
+                    </p>
+                </li>
+            </ul>
+            <p v-else class="py-4 text-center text-sm text-stone-500">
+                Visos nebegaliojančios prekės sutvarkytos.
+            </p>
+
+            <DialogFooter>
+                <Button variant="outline" @click="skippedDialogOpen = false">
+                    Uždaryti
+                </Button>
+                <Button v-if="totalCount > 0" @click="viewRestoredCart">
+                    <ShoppingCart :size="15" :stroke-width="2" />
+                    Peržiūrėti krepšelį
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
 </template>

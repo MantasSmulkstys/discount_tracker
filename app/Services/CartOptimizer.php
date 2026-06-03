@@ -130,12 +130,21 @@ class CartOptimizer
     /**
      * Map each cart item to its candidate offers, keyed by store_slug.
      *
+     * Matching is "same family + same package size": an alternative may swap to
+     * a sibling product in the same family only when it comes in the same size
+     * the shopper already picked. This is the middle ground between matching the
+     * exact product (too strict — misses the same water sold under a slightly
+     * different name at another store) and the whole family (too loose — offers
+     * 0.5 l / 2 l / flavoured variants as if interchangeable). When the size of
+     * the shopper's own offer can't be determined, we fall back to the exact
+     * product so we never substitute blindly.
+     *
      * @param  list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, quantity: int, storeSlug: ?string, priceCents: ?int}>  $items
      * @return list<array{
      *     input: array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, quantity: int, storeSlug: ?string, priceCents: ?int},
      *     fixed: bool,
      *     fallbackName: string,
-     *     offers: array<string, array{priceCents: int, name: string, variantId: int}>
+     *     offers: array<string, array{priceCents: int, name: string, normalizedProductId: int, variantId: int, snapshotId: int, image: ?string}>
      * }>
      */
     private function buildCandidates(array $items): array
@@ -145,22 +154,41 @@ class CartOptimizer
         foreach ($items as $item) {
             $offers = [];
             $fallbackName = '';
+            $npId = $item['normalizedProductId'];
 
-            if ($item['familyId'] !== null) {
-                $rows = $this->fetchFreshOffersForFamily($item['familyId']);
+            if ($npId !== null) {
+                $rows = $this->fetchFreshOfferRows($item['familyId'], $npId);
+                $referenceSizeKey = $this->referenceSizeKey($rows, $npId, $item['storeSlug']);
+
                 foreach ($rows as $row) {
-                    $slug = Str::slug((string) $row->store_name);
-                    $price = (int) round(((float) $row->price) * 100);
+                    $rowNpId = (int) $row->normalized_product_id;
 
-                    if (! isset($offers[$slug]) || $offers[$slug]['priceCents'] > $price) {
-                        $offers[$slug] = [
-                            'priceCents' => $price,
-                            'name' => (string) $row->product_name,
-                            'variantId' => (int) $row->product_variant_id,
-                        ];
-                        if ($fallbackName === '') {
-                            $fallbackName = (string) $row->product_name;
-                        }
+                    // Same family + same size, or — when the shopper's own size
+                    // is unknown — only the exact same product.
+                    $matches = $referenceSizeKey === null
+                        ? ($rowNpId === $npId)
+                        : ($this->sizeKey($row) === $referenceSizeKey);
+
+                    if (! $matches) {
+                        continue;
+                    }
+
+                    $slug = (string) $row->store_slug;
+                    $candidate = [
+                        'priceCents' => (int) round(((float) $row->price) * 100),
+                        'name' => $this->offerName($row),
+                        'normalizedProductId' => $rowNpId,
+                        'variantId' => (int) $row->product_variant_id,
+                        'snapshotId' => (int) $row->id,
+                        'image' => $row->image_url !== null ? (string) $row->image_url : null,
+                    ];
+
+                    if ($fallbackName === '' && $rowNpId === $npId) {
+                        $fallbackName = $candidate['name'];
+                    }
+
+                    if (! isset($offers[$slug]) || $this->preferOffer($candidate, $offers[$slug], $npId)) {
+                        $offers[$slug] = $candidate;
                     }
                 }
             }
@@ -177,35 +205,144 @@ class CartOptimizer
     }
 
     /**
-     * Get all current fresh offers for a family, grouped by store.
+     * Pick the better of two offers for the same store: the shopper's exact
+     * product wins over a mere sibling, then cheaper, then a stable id so the
+     * choice is deterministic when prices tie.
+     *
+     * @param  array{priceCents: int, name: string, normalizedProductId: int, variantId: int, snapshotId: int, image: ?string}  $candidate
+     * @param  array{priceCents: int, name: string, normalizedProductId: int, variantId: int, snapshotId: int, image: ?string}  $current
+     */
+    private function preferOffer(array $candidate, array $current, int $npId): bool
+    {
+        $candidateExact = $candidate['normalizedProductId'] === $npId;
+        $currentExact = $current['normalizedProductId'] === $npId;
+
+        if ($candidateExact !== $currentExact) {
+            return $candidateExact;
+        }
+
+        if ($candidate['priceCents'] !== $current['priceCents']) {
+            return $candidate['priceCents'] < $current['priceCents'];
+        }
+
+        return $candidate['snapshotId'] < $current['snapshotId'];
+    }
+
+    /**
+     * The package-size signature shared by interchangeable offers. Prefers the
+     * scraped net quantity (the real total amount), falling back to size × pack
+     * count. Returns null when the variant carries no size at all.
+     */
+    private function sizeKey(object $row): ?string
+    {
+        $net = $row->net_quantity_value ?? null;
+        $netUnit = $row->net_quantity_unit ?? null;
+        if ($net !== null && $netUnit) {
+            return round((float) $net, 3).'|'.mb_strtolower((string) $netUnit);
+        }
+
+        $size = $row->size_value ?? null;
+        $sizeUnit = $row->size_unit ?? null;
+        if ($size !== null && $sizeUnit) {
+            $pack = $row->package_count !== null ? (float) $row->package_count : 1.0;
+            $total = (float) $size * ($pack > 0 ? $pack : 1.0);
+
+            return round($total, 3).'|'.mb_strtolower((string) $sizeUnit);
+        }
+
+        return null;
+    }
+
+    /**
+     * The size of the offer the shopper actually has: their exact product at
+     * their store, falling back to any offer of that product. Null when the
+     * product carries no size, which forces exact-product matching.
+     *
+     * @param  array<int, object>  $rows
+     */
+    private function referenceSizeKey(array $rows, int $npId, ?string $storeSlug): ?string
+    {
+        $fallback = null;
+
+        foreach ($rows as $row) {
+            if ((int) $row->normalized_product_id !== $npId) {
+                continue;
+            }
+
+            $key = $this->sizeKey($row);
+
+            if ($storeSlug !== null && (string) $row->store_slug === $storeSlug) {
+                return $key;
+            }
+
+            $fallback ??= $key;
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * Display name for an offer — the raw scraped name (grammatically correct,
+     * with diacritics) when present, else the canonical name. Mirrors the
+     * cart/listing which prefer the raw name.
+     */
+    private function offerName(object $row): string
+    {
+        $raw = isset($row->raw_name) && $row->raw_name !== null ? trim((string) $row->raw_name) : '';
+
+        return $raw !== '' ? $raw : (string) $row->product_name;
+    }
+
+    /**
+     * Fetch fresh offers to choose alternatives from. Scoped to the item's
+     * family when it has one (so same-size siblings are eligible), else to the
+     * exact product. One latest row per (product, store); the caller narrows by
+     * size and keeps the best offer per store.
      *
      * @return array<int, object>
      */
-    private function fetchFreshOffersForFamily(int $familyId): array
+    private function fetchFreshOfferRows(?int $familyId, int $normalizedProductId): array
     {
         $today = now()->toDateString();
         $cutoff = now()->subDays(KainuCatalog::FRESHNESS_WINDOW_DAYS)->toDateString();
 
-        return DB::table('offer_snapshots')
+        $query = DB::table('offer_snapshots')
             ->join('product_variants', 'product_variants.id', '=', 'offer_snapshots.product_variant_id')
             ->join('normalized_products', 'normalized_products.id', '=', 'product_variants.normalized_product_id')
             ->join('stores', 'stores.id', '=', 'offer_snapshots.store_id')
+            ->leftJoin('raw_offers', 'raw_offers.id', '=', 'offer_snapshots.raw_offer_id')
             ->whereIn('offer_snapshots.id', OfferSnapshot::latestIdsPerProductStoreSubquery())
             ->where(function ($q) use ($today): void {
                 $q->whereNull('offer_snapshots.valid_to')
                     ->orWhere('offer_snapshots.valid_to', '>=', $today);
             })
             ->where('offer_snapshots.scraped_at', '>=', $cutoff)
-            ->where('normalized_products.family_id', $familyId)
-            ->whereNotNull('offer_snapshots.price')
+            ->whereNotNull('offer_snapshots.price');
+
+        if ($familyId !== null) {
+            $query->where('normalized_products.family_id', $familyId);
+        } else {
+            $query->where('product_variants.normalized_product_id', $normalizedProductId);
+        }
+
+        return $query
             ->select([
                 'offer_snapshots.id',
                 'offer_snapshots.price',
                 'offer_snapshots.product_variant_id',
+                'product_variants.size_value',
+                'product_variants.size_unit',
+                'product_variants.package_count',
+                'product_variants.package_unit',
+                'product_variants.net_quantity_value',
+                'product_variants.net_quantity_unit',
+                'normalized_products.id as normalized_product_id',
                 'normalized_products.canonical_name as product_name',
                 'stores.slug as store_slug',
                 'stores.name as store_name',
+                'raw_offers.name as raw_name',
             ])
+            ->selectRaw('COALESCE(raw_offers.image, normalized_products.image_url) as image_url')
             ->get()
             ->all();
     }
@@ -315,15 +452,20 @@ class CartOptimizer
     /**
      * For a given subset, pick the cheapest offer per item from that subset.
      *
+     * The picked item carries the *actually chosen* offer's identity (its own
+     * product id, variant, snapshot and name/image) rather than the cart item's
+     * — so when a same-size sibling is substituted, the UI links to and shows
+     * that real product, not the original.
+     *
      * @param  list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, quantity: int, storeSlug: ?string, priceCents: ?int}>  $items
      * @param  list<array{
      *     input: array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, quantity: int, storeSlug: ?string, priceCents: ?int},
      *     fixed: bool,
      *     fallbackName: string,
-     *     offers: array<string, array{priceCents: int, name: string, variantId: int}>
+     *     offers: array<string, array{priceCents: int, name: string, normalizedProductId: int, variantId: int, snapshotId: int, image: ?string}>
      * }>  $candidates
      * @param  list<string>  $subset
-     * @return array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}|null
+     * @return array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}|null
      */
     private function buildSubset(array $items, array $candidates, array $subset): ?array
     {
@@ -343,50 +485,56 @@ class CartOptimizer
                     'familyId' => $input['familyId'],
                     'normalizedProductId' => $input['normalizedProductId'],
                     'variantId' => $input['variantId'],
+                    'snapshotId' => null,
                     'storeSlug' => (string) ($input['storeSlug'] ?? 'other'),
                     'priceCents' => $fallbackPrice,
                     'quantity' => $input['quantity'],
                     'name' => $cand['fallbackName'] !== ''
                         ? $cand['fallbackName']
                         : 'Prekė',
+                    'image' => null,
                     'fixed' => true,
+                    'changed' => false,
                 ];
 
                 continue;
             }
 
             $bestSlug = null;
-            $bestPrice = null;
-            $bestName = '';
-            $bestVariantId = 0;
+            $best = null;
 
             foreach ($subset as $slug) {
                 if (! isset($cand['offers'][$slug])) {
                     continue;
                 }
                 $offer = $cand['offers'][$slug];
-                if ($bestPrice === null || $offer['priceCents'] < $bestPrice) {
-                    $bestPrice = $offer['priceCents'];
+                if ($best === null || $offer['priceCents'] < $best['priceCents']) {
+                    $best = $offer;
                     $bestSlug = $slug;
-                    $bestName = $offer['name'];
-                    $bestVariantId = $offer['variantId'];
                 }
             }
 
-            if ($bestSlug === null || $bestPrice === null) {
+            if ($bestSlug === null || $best === null) {
                 return null;
             }
 
-            $total += $bestPrice * $input['quantity'];
+            $total += $best['priceCents'] * $input['quantity'];
             $picked[] = [
                 'familyId' => $input['familyId'],
-                'normalizedProductId' => $input['normalizedProductId'],
-                'variantId' => $bestVariantId,
+                'normalizedProductId' => $best['normalizedProductId'],
+                'variantId' => $best['variantId'],
+                'snapshotId' => $best['snapshotId'],
                 'storeSlug' => $bestSlug,
-                'priceCents' => $bestPrice,
+                'priceCents' => $best['priceCents'],
                 'quantity' => $input['quantity'],
-                'name' => $bestName,
+                'name' => $best['name'],
+                'image' => $best['image'],
                 'fixed' => false,
+                // A line "changes" only when it moves store or swaps to a
+                // sibling product — a same-store/same-product re-price is not a
+                // change the shopper has to act on, so the UI hides it.
+                'changed' => $best['normalizedProductId'] !== $input['normalizedProductId']
+                    || $bestSlug !== $input['storeSlug'],
             ];
         }
 
@@ -512,8 +660,8 @@ class CartOptimizer
     /**
      * Drop points that are dominated on both price AND time.
      *
-     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>  $points
-     * @return list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>
+     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>  $points
+     * @return list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>
      */
     private function paretoFilter(array $points): array
     {
@@ -545,8 +693,8 @@ class CartOptimizer
     /**
      * Within ε on both axes, keep the one with fewer stores.
      *
-     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>  $points
-     * @return list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>
+     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>  $points
+     * @return list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>
      */
     private function collapseNearDuplicates(array $points): array
     {
@@ -573,9 +721,9 @@ class CartOptimizer
     }
 
     /**
-     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>  $points
+     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>  $points
      * @param  array{totalPriceCents: int, totalDurationSec: int, stores: list<string>}  $baseline
-     * @return list<array{label: string, stores: list<string>, totalPriceCents: int, totalDurationSec: int, priceDeltaCents: int, durationDeltaSec: int, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>
+     * @return list<array{label: string, stores: list<string>, totalPriceCents: int, totalDurationSec: int, priceDeltaCents: int, durationDeltaSec: int, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>
      */
     private function labelPoints(array $points, array $baseline): array
     {
@@ -632,7 +780,7 @@ class CartOptimizer
     }
 
     /**
-     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>  $points
+     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>  $points
      * @param  callable(array<string, mixed>): int  $key
      * @return array<string, mixed>|null
      */
@@ -656,7 +804,7 @@ class CartOptimizer
     }
 
     /**
-     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, fixed: bool}>}>  $points
+     * @param  list<array{totalPriceCents: int, totalDurationSec: int, stores: list<string>, items: list<array{familyId: ?int, normalizedProductId: ?int, variantId: ?int, snapshotId: ?int, storeSlug: string, priceCents: int, quantity: int, name: string, image: ?string, fixed: bool, changed: bool}>}>  $points
      * @param  array{totalPriceCents: int, totalDurationSec: int, stores: list<string>}  $baseline
      * @return array<string, mixed>|null
      */

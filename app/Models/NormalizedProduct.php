@@ -28,8 +28,18 @@ class NormalizedProduct extends Model
      */
     protected $casts = [
         'needs_review' => 'boolean',
+        'is_hidden' => 'boolean',
         'ai_confidence' => 'decimal:4',
     ];
+
+    /**
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeVisible(Builder $query): Builder
+    {
+        return $query->where("{$this->getTable()}.is_hidden", false);
+    }
 
     /**
      * @return HasMany<ProductReport, self>

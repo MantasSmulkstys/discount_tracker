@@ -3,18 +3,16 @@ import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeft,
     Check,
-    Download,
     Minus,
     Plus,
     Receipt,
     Save,
-    Share2,
     ShoppingBasket,
     TrendingDown,
     Trash2,
     X,
 } from 'lucide-vue-next';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import CartAlternativeCard from '@/components/kainu/CartAlternativeCard.vue';
 import type { Alternative } from '@/components/kainu/CartAlternativeCard.vue';
 import ProductImage from '@/components/kainu/ProductImage.vue';
@@ -22,10 +20,11 @@ import RoutePlanner from '@/components/kainu/RoutePlanner.vue';
 import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import StoreMap from '@/components/kainu/StoreMap.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
+import { useKainuRoutePlan } from '@/composables/useKainuRoutePlan';
 import { discountPct, formatPrice } from '@/lib/kainu';
 import savedCarts from '@/routes/saved-carts';
 import shoppingLists from '@/routes/shopping-lists';
-import type { GoogleMapsConfig } from '@/types/kainu';
+import type { GoogleMapsConfig, KainuProduct } from '@/types/kainu';
 
 const props = defineProps<{
     googleMaps: GoogleMapsConfig;
@@ -46,6 +45,12 @@ const {
     remove,
     clear,
 } = useKainuCart();
+
+// Show the raw scraped product name (grammatically correct, with diacritics)
+// rather than the ASCII-collapsed canonical/normalized form. Mirrors the
+// listing (ProductCard) and product page (Show.vue).
+const productLabel = (product: KainuProduct): string =>
+    product.displayName?.trim() || product.name;
 
 const itemCountLabel = computed(() => {
     const n = totalCount.value;
@@ -70,10 +75,7 @@ const savingsPct = computed(() => {
         return 0;
     }
 
-    return Math.max(
-        0,
-        Math.round((savings.value / originalTotal.value) * 100),
-    );
+    return Math.max(0, Math.round((savings.value / originalTotal.value) * 100));
 });
 
 const highlightChains = computed<string[]>(() => storesUsed.value);
@@ -93,15 +95,20 @@ type RoutePlanResult = {
     alternatives?: Alternative[];
 };
 
+const { routePlanVisible, routeOrigin, routeOriginLabel, routeMode } =
+    useKainuRoutePlan();
+
 const routePlan = ref<RoutePlanResult | null>(null);
-const routeOrigin = ref<LatLng | null>(null);
-const routePolyline = computed<string | null>(() => routePlan.value?.polyline ?? null);
-const routeStops = computed<RoutePlanStop[]>(() => routePlan.value?.stops ?? []);
+const routePolyline = computed<string | null>(
+    () => routePlan.value?.polyline ?? null,
+);
+const routeStops = computed<RoutePlanStop[]>(
+    () => routePlan.value?.stops ?? [],
+);
 const alternatives = computed<Alternative[]>(
     () => routePlan.value?.alternatives ?? [],
 );
 const hasMapsKey = computed<boolean>(() => Boolean(props.googleMaps?.apiKey));
-const planningVisible = ref(false);
 const planningSectionRef = ref<HTMLElement | null>(null);
 
 const onRoutePlan = (plan: RoutePlanResult | null): void => {
@@ -109,41 +116,97 @@ const onRoutePlan = (plan: RoutePlanResult | null): void => {
 };
 
 const applyAlternative = (alt: Alternative): void => {
-    clear();
-    for (const item of alt.items) {
-        addToCart(
-            {
-                id: item.normalizedProductId ?? Math.random(),
-                normalizedProductId: item.normalizedProductId ?? 0,
-                familyId: item.familyId,
-                name: item.name,
-                normalizedName: null,
-                brand: null,
-                category: 'all',
-                unit: null,
-                emoji: '',
-                bestPrice: item.priceCents / 100,
-                oldPrice: null,
-                discount: null,
-                condition: null,
-                bestStore: item.storeSlug,
-                bestStoreName: item.storeSlug,
-                image: null,
-                url: null,
-                validDates: null,
-                validFrom: null,
-                validTo: null,
-                loyaltyCard: false,
-                scrapedAt: null,
-            },
-            item.quantity,
-            item.storeSlug,
+    const previous = [...items.value];
+
+    // Reuse cosmetic fields (emoji, brand, unit, image) from the current cart
+    // only when the alternative keeps the *same* product. A same-size sibling
+    // is a genuinely different product, so we render it from its own offer data
+    // — name, image and snapshot id (which drives the detail link) — rather than
+    // dressing it up as the original item.
+    const sameProductBase = (
+        normalizedProductId: number | null,
+    ): KainuProduct | null => {
+        if (normalizedProductId === null) {
+            return null;
+        }
+
+        return (
+            previous.find(
+                (p) => p.product.normalizedProductId === normalizedProductId,
+            )?.product ?? null
         );
-    }
+    };
+
+    clear();
+
+    alt.items.forEach((item) => {
+        const base = sameProductBase(item.normalizedProductId);
+        const price = item.priceCents / 100;
+        const storeChanged = !base || base.bestStore !== item.storeSlug;
+
+        const product: KainuProduct = base
+            ? {
+                  ...base,
+                  id: item.snapshotId ?? base.id,
+                  name: item.name || base.name,
+                  displayName: item.name || base.displayName,
+                  image: item.image ?? base.image,
+                  bestPrice: price,
+                  // oldPrice/discount belong to the original store; drop them
+                  // when the store changes so we don't show a bogus discount.
+                  oldPrice: storeChanged ? null : base.oldPrice,
+                  discount: storeChanged ? null : base.discount,
+                  bestStore: item.storeSlug,
+                  bestStoreName: storeChanged
+                      ? item.storeSlug
+                      : base.bestStoreName,
+              }
+            : {
+                  // Never fall back to normalizedProductId here: the detail
+                  // route resolves /products/{id} by offer_snapshots.id, so a
+                  // product id in that slot links to an unrelated offer that
+                  // merely shares the number. snapshotId is always present for
+                  // a real substitution; Math.random() is just a unique cart key
+                  // for the (unreachable) no-snapshot case.
+                  id: item.snapshotId ?? Math.random(),
+                  normalizedProductId: item.normalizedProductId ?? 0,
+                  familyId: item.familyId,
+                  name: item.name,
+                  displayName: item.name,
+                  normalizedName: null,
+                  brand: null,
+                  category: 'all',
+                  unit: null,
+                  emoji: '',
+                  bestPrice: price,
+                  oldPrice: null,
+                  discount: null,
+                  condition: null,
+                  bestStore: item.storeSlug,
+                  bestStoreName: item.storeSlug,
+                  image: item.image,
+                  url: null,
+                  validDates: null,
+                  validFrom: null,
+                  validTo: null,
+                  loyaltyCard: false,
+                  scrapedAt: null,
+              };
+
+        addToCart(product, item.quantity, item.storeSlug);
+    });
 };
 
 const onRouteOrigin = (next: LatLng | null): void => {
     routeOrigin.value = next;
+};
+
+const onRouteOriginLabel = (label: string): void => {
+    routeOriginLabel.value = label;
+};
+
+const onRouteMode = (mode: 'walking' | 'driving'): void => {
+    routeMode.value = mode;
 };
 
 const page = usePage();
@@ -195,7 +258,7 @@ const submitSave = (): void => {
             normalizedProductId: i.product.normalizedProductId ?? null,
             variantId: null,
             quantity: i.qty,
-            name: i.product.name,
+            name: i.product.displayName?.trim() || i.product.name,
             storeSlug: i.storeId ?? null,
             priceCents:
                 i.product.bestPrice !== null
@@ -248,13 +311,25 @@ const generateShoppingPlan = async (): Promise<void> => {
         });
     }
 
-    planningVisible.value = true;
+    routePlanVisible.value = true;
+    await scrollToPlanningSection();
+};
+
+const scrollToPlanningSection = async (): Promise<void> => {
     await nextTick();
     planningSectionRef.value?.scrollIntoView({
         behavior: 'smooth',
         block: 'start',
     });
 };
+
+onMounted(() => {
+    // When returning to the cart with a previously generated route, bring the
+    // restored maršrutas section into view automatically.
+    if (routePlanVisible.value && items.value.length > 0) {
+        void scrollToPlanningSection();
+    }
+});
 </script>
 
 <template>
@@ -306,20 +381,6 @@ const generateShoppingPlan = async (): Promise<void> => {
                     </button>
                     <button
                         type="button"
-                        class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-kainu-border bg-white px-3 text-[12px] font-medium text-stone-700 transition-colors hover:bg-kainu-surface"
-                    >
-                        <Download :size="14" :stroke-width="2" />
-                        Eksportuoti
-                    </button>
-                    <button
-                        type="button"
-                        class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-kainu-border bg-white px-3 text-[12px] font-medium text-stone-700 transition-colors hover:bg-kainu-surface"
-                    >
-                        <Share2 :size="14" :stroke-width="2" />
-                        Dalintis
-                    </button>
-                    <button
-                        type="button"
                         class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-transparent bg-white px-3 text-[12px] font-medium text-red-600 transition-colors hover:border-red-100 hover:bg-red-50"
                         @click="clear"
                     >
@@ -330,7 +391,9 @@ const generateShoppingPlan = async (): Promise<void> => {
             </div>
         </header>
 
-        <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+        <div
+            class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start"
+        >
             <div class="flex flex-col gap-6">
                 <div
                     v-if="items.length === 0"
@@ -346,8 +409,8 @@ const generateShoppingPlan = async (): Promise<void> => {
                             Krepšelis tuščias
                         </h2>
                         <p class="max-w-sm text-[13px] text-stone-500">
-                            Pradėkite rinkti prekes su geriausia kaina — krepšelį
-                            matysite čia bet kuriuo metu.
+                            Pradėkite rinkti prekes su geriausia kaina —
+                            krepšelį matysite čia bet kuriuo metu.
                         </p>
                     </div>
                     <Link
@@ -392,7 +455,7 @@ const generateShoppingPlan = async (): Promise<void> => {
                                 <ProductImage
                                     :seed="i.id"
                                     :src="i.product.image"
-                                    :name="i.product.name"
+                                    :name="productLabel(i.product)"
                                     :emoji="i.product.emoji"
                                     :size="64"
                                     class="shrink-0"
@@ -404,7 +467,7 @@ const generateShoppingPlan = async (): Promise<void> => {
                                                 :href="`/products/${i.id}`"
                                                 class="block truncate text-[14px] font-semibold text-stone-900 hover:underline"
                                             >
-                                                {{ i.product.name }}
+                                                {{ productLabel(i.product) }}
                                             </Link>
                                             <div
                                                 class="mt-0.5 flex items-center gap-2 text-[12px] text-stone-500"
@@ -413,7 +476,10 @@ const generateShoppingPlan = async (): Promise<void> => {
                                                     {{ i.product.brand }}
                                                 </span>
                                                 <span
-                                                    v-if="i.product.brand && i.product.unit"
+                                                    v-if="
+                                                        i.product.brand &&
+                                                        i.product.unit
+                                                    "
                                                     class="text-stone-300"
                                                 >
                                                     ·
@@ -431,17 +497,22 @@ const generateShoppingPlan = async (): Promise<void> => {
                                         <span
                                             class="text-[14px] font-bold text-stone-900"
                                         >
-                                            {{ formatPrice(i.product.bestPrice) }}
+                                            {{
+                                                formatPrice(i.product.bestPrice)
+                                            }}
                                         </span>
                                         <span
                                             v-if="
                                                 i.product.oldPrice &&
                                                 i.product.bestPrice &&
-                                                i.product.oldPrice > i.product.bestPrice
+                                                i.product.oldPrice >
+                                                    i.product.bestPrice
                                             "
                                             class="text-stone-400 line-through"
                                         >
-                                            {{ formatPrice(i.product.oldPrice) }}
+                                            {{
+                                                formatPrice(i.product.oldPrice)
+                                            }}
                                         </span>
                                         <span
                                             v-if="
@@ -500,7 +571,8 @@ const generateShoppingPlan = async (): Promise<void> => {
                                     >
                                         {{
                                             formatPrice(
-                                                (i.product.bestPrice ?? 0) * i.qty,
+                                                (i.product.bestPrice ?? 0) *
+                                                    i.qty,
                                             )
                                         }}
                                     </div>
@@ -520,9 +592,9 @@ const generateShoppingPlan = async (): Promise<void> => {
                 </template>
 
                 <section
-                    v-if="planningVisible"
+                    v-if="routePlanVisible"
                     ref="planningSectionRef"
-                    class="flex flex-col gap-4 scroll-mt-20 rounded-[16px] border border-kainu-border bg-white p-5"
+                    class="flex scroll-mt-20 flex-col gap-4 rounded-[16px] border border-kainu-border bg-white p-5"
                 >
                     <header class="flex items-start justify-between gap-3">
                         <div>
@@ -539,9 +611,9 @@ const generateShoppingPlan = async (): Promise<void> => {
                         </div>
                         <button
                             type="button"
-                            aria-label="Slėpti pirkinių sąrašą"
+                            aria-label="Slėpti apsipirkimo maršrutą"
                             class="-mr-1 inline-flex h-8 w-8 items-center justify-center rounded-md text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-700"
-                            @click="planningVisible = false"
+                            @click="routePlanVisible = false"
                         >
                             <X :size="16" :stroke-width="2" />
                         </button>
@@ -568,8 +640,13 @@ const generateShoppingPlan = async (): Promise<void> => {
                             "
                             :has-maps-key="hasMapsKey"
                             :api-key="googleMaps.apiKey ?? null"
+                            :initial-origin="routeOrigin"
+                            :initial-origin-label="routeOriginLabel"
+                            :initial-mode="routeMode"
                             @plan="onRoutePlan"
                             @origin="onRouteOrigin"
+                            @origin-label="onRouteOriginLabel"
+                            @mode="onRouteMode"
                         />
 
                         <section
@@ -585,9 +662,7 @@ const generateShoppingPlan = async (): Promise<void> => {
                                 Pasiūlymai, kurie gali būti pigesni arba
                                 greitesni už dabartinį krepšelį.
                             </p>
-                            <div
-                                class="flex gap-3 overflow-x-auto pb-2"
-                            >
+                            <div class="flex gap-3 overflow-x-auto pb-2">
                                 <CartAlternativeCard
                                     v-for="(alt, idx) in alternatives"
                                     :key="alt.label + idx"
@@ -627,7 +702,7 @@ const generateShoppingPlan = async (): Promise<void> => {
                     <dl class="flex flex-col gap-2 text-[13px]">
                         <div class="flex justify-between text-stone-500">
                             <dt>Tarpinė suma</dt>
-                            <dd class="tabular-nums text-stone-700">
+                            <dd class="text-stone-700 tabular-nums">
                                 {{ formatPrice(originalTotal) }}
                             </dd>
                         </div>
@@ -656,7 +731,11 @@ const generateShoppingPlan = async (): Promise<void> => {
                         class="mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-brand-700 text-[14px] font-semibold text-white transition-colors hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
                         @click="generateShoppingPlan"
                     >
-                        {{ planningVisible ? 'Atnaujinti pirkinių sąrašą' : 'Generuoti pirkinių sąrašą' }}
+                        {{
+                            routePlanVisible
+                                ? 'Atnaujinti apsipirkimo maršrutą'
+                                : 'Generuoti apsipirkimo maršrutą'
+                        }}
                     </button>
                 </div>
             </aside>
@@ -675,12 +754,14 @@ const generateShoppingPlan = async (): Promise<void> => {
                 aria-label="Išsaugoti sąrašą"
             >
                 <div class="border-b border-kainu-border px-5 py-4">
-                    <h3 class="m-0 text-[16px] font-bold tracking-tight text-stone-900">
+                    <h3
+                        class="m-0 text-[16px] font-bold tracking-tight text-stone-900"
+                    >
                         Išsaugoti sąrašą
                     </h3>
                     <p class="mt-1 text-[12px] text-stone-500">
-                        Sąrašą galėsite vėliau atkurti į krepšelį iš
-                        „Mano sąrašai“ skilties.
+                        Sąrašą galėsite vėliau atkurti į krepšelį iš „Mano
+                        sąrašai“ skilties.
                     </p>
                 </div>
                 <div class="flex flex-col gap-3 px-5 py-4">

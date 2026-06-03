@@ -15,6 +15,12 @@ import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { useKainuCart } from '@/composables/useKainuCart';
 import { formatPrice } from '@/lib/kainu';
 import savedCarts from '@/routes/saved-carts';
+import type { KainuProduct } from '@/types/kainu';
+
+// Prefer the raw scraped name (correct grammar/diacritics) over the
+// ASCII-collapsed canonical form, matching the cart page and listing.
+const productLabel = (product: KainuProduct): string =>
+    product.displayName?.trim() || product.name;
 
 const {
     items,
@@ -73,11 +79,11 @@ const submitSave = () => {
     const payload = {
         name,
         items: items.value.map((i) => ({
-            familyId: null,
+            familyId: i.product.familyId ?? null,
             normalizedProductId: i.product.normalizedProductId ?? null,
             variantId: null,
             quantity: i.qty,
-            name: i.product.name,
+            name: i.product.displayName?.trim() || i.product.name,
             storeSlug: i.storeId ?? null,
             priceCents:
                 i.product.bestPrice !== null
@@ -221,7 +227,7 @@ watch(isOpen, (open) => {
                             <ProductImage
                                 :seed="i.id"
                                 :src="i.product.image"
-                                :name="i.product.name"
+                                :name="productLabel(i.product)"
                                 :emoji="i.product.emoji"
                                 :size="48"
                             />
@@ -229,7 +235,7 @@ watch(isOpen, (open) => {
                                 <div
                                     class="truncate text-[13px] font-medium text-stone-900"
                                 >
-                                    {{ i.product.name }}
+                                    {{ productLabel(i.product) }}
                                 </div>
                                 <div class="text-[11px] text-stone-500">
                                     <template v-if="i.product.unit">
@@ -345,12 +351,14 @@ watch(isOpen, (open) => {
                 aria-label="Išsaugoti sąrašą"
             >
                 <div class="border-b border-kainu-border px-5 py-4">
-                    <h3 class="m-0 text-[16px] font-bold tracking-tight text-stone-900">
+                    <h3
+                        class="m-0 text-[16px] font-bold tracking-tight text-stone-900"
+                    >
                         Išsaugoti sąrašą
                     </h3>
                     <p class="mt-1 text-[12px] text-stone-500">
-                        Sąrašą galėsite vėliau atkurti į krepšelį iš
-                        „Mano sąrašai“ skilties.
+                        Sąrašą galėsite vėliau atkurti į krepšelį iš „Mano
+                        sąrašai“ skilties.
                     </p>
                 </div>
                 <div class="flex flex-col gap-3 px-5 py-4">

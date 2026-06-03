@@ -1,11 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import StoreLogo from '@/components/kainu/StoreLogo.vue';
 import { formatPrice } from '@/lib/kainu';
+
+export type HistoryPoint = {
+    date: string;
+    price: number;
+    oldPrice: number | null;
+    name: string;
+    store: string;
+    storeName: string;
+    sizeLabel: string | null;
+    condition: string | null;
+    imageUrl: string | null;
+};
 
 type Props = {
     values: number[];
     labels?: string[];
     dates?: string[];
+    points?: HistoryPoint[];
     width?: number;
     height?: number;
 };
@@ -13,9 +27,12 @@ type Props = {
 const props = withDefaults(defineProps<Props>(), {
     labels: () => [],
     dates: () => [],
+    points: () => [],
     width: 900,
     height: 220,
 });
+
+const hoverIndex = ref<number | null>(null);
 
 const chart = computed(() => {
     if (!props.values.length) {
@@ -82,6 +99,10 @@ const chart = computed(() => {
                       : `−${props.values.length - 1 - i}sav`,
               );
 
+    // Half the gap between points, so each hover band fills its own column.
+    const bandHalf =
+        points.length > 1 ? (points[1].x - points[0].x) / 2 : W / 2;
+
     return {
         pad,
         W,
@@ -93,17 +114,52 @@ const chart = computed(() => {
         change,
         labels,
         weeksSpan,
+        bandHalf,
     };
 });
+
+const hoverPoint = computed<HistoryPoint | null>(() => {
+    if (hoverIndex.value === null) {
+        return null;
+    }
+
+    return props.points[hoverIndex.value] ?? null;
+});
+
+// Position the tooltip as a percentage of the viewBox so it stays glued to the
+// point regardless of how the responsive SVG is scaled.
+const tooltipStyle = computed(() => {
+    if (hoverIndex.value === null || !chart.value) {
+        return {};
+    }
+
+    const p = chart.value.points[hoverIndex.value];
+
+    return {
+        left: `${(p.x / props.width) * 100}%`,
+        top: `${(p.y / props.height) * 100}%`,
+    };
+});
+
+const discountPct = (point: HistoryPoint): number | null => {
+    if (
+        point.oldPrice === null ||
+        point.oldPrice <= 0 ||
+        point.oldPrice <= point.price
+    ) {
+        return null;
+    }
+
+    return Math.round(((point.oldPrice - point.price) / point.oldPrice) * 100);
+};
 </script>
 
 <template>
-    <div v-if="chart" class="w-full">
+    <div v-if="chart" class="relative mx-auto w-full" :style="{ maxWidth: `${width}px` }">
         <svg
             :viewBox="`0 0 ${width} ${height}`"
             preserveAspectRatio="xMidYMid meet"
             class="block w-full"
-            :style="{ maxWidth: `${width}px` }"
         >
             <defs>
                 <linearGradient id="priceFill" x1="0" x2="0" y1="0" y2="1">
@@ -149,12 +205,22 @@ const chart = computed(() => {
                 <circle
                     :cx="p.x"
                     :cy="p.y"
-                    :r="i === chart.points.length - 1 ? 5 : 3"
-                    :fill="i === chart.points.length - 1 ? '#15803d' : '#fff'"
+                    :r="
+                        hoverIndex === i
+                            ? 6
+                            : i === chart.points.length - 1
+                              ? 5
+                              : 3
+                    "
+                    :fill="
+                        hoverIndex === i || i === chart.points.length - 1
+                            ? '#15803d'
+                            : '#fff'
+                    "
                     stroke="#15803d"
                     stroke-width="2"
                 />
-                <g v-if="i === chart.points.length - 1">
+                <g v-if="i === chart.points.length - 1 && hoverIndex === null">
                     <rect
                         :x="p.x - 34"
                         :y="p.y - 30"
@@ -179,11 +245,27 @@ const chart = computed(() => {
                     :y="height - 8"
                     text-anchor="middle"
                     font-size="10"
-                    fill="#a8a29e"
+                    :fill="hoverIndex === i ? '#15803d' : '#a8a29e'"
+                    :font-weight="hoverIndex === i ? '600' : '400'"
                 >
                     {{ chart.labels[i] }}
                 </text>
             </g>
+
+            <!-- Transparent hover bands: one per point, so the whole column is
+                 a comfortable hit target rather than just the small dot. -->
+            <rect
+                v-for="(p, i) in chart.points"
+                :key="`band-${i}`"
+                :x="p.x - chart.bandHalf"
+                :y="chart.pad.t"
+                :width="chart.bandHalf * 2"
+                :height="chart.H"
+                fill="transparent"
+                style="cursor: pointer"
+                @mouseenter="hoverIndex = i"
+                @mouseleave="hoverIndex = null"
+            />
 
             <g
                 :transform="`translate(${chart.pad.l + chart.W - 96}, ${chart.pad.t})`"
@@ -207,5 +289,72 @@ const chart = computed(() => {
                 </text>
             </g>
         </svg>
+
+        <!-- Compact listing preview for the hovered week. -->
+        <div
+            v-if="hoverPoint"
+            class="pointer-events-none absolute z-20 w-56 -translate-x-1/2 -translate-y-full"
+            :style="tooltipStyle"
+        >
+            <div
+                class="mb-2 flex gap-2 rounded-xl border border-stone-200 bg-white p-2.5 shadow-lg"
+            >
+                <img
+                    v-if="hoverPoint.imageUrl"
+                    :src="hoverPoint.imageUrl"
+                    :alt="hoverPoint.name"
+                    class="h-12 w-12 shrink-0 rounded-md border border-stone-100 bg-white object-contain"
+                />
+                <div class="flex min-w-0 flex-1 flex-col">
+                    <div class="flex items-center gap-1">
+                        <StoreLogo :store-id="hoverPoint.store" :size="14" />
+                        <span class="truncate text-[11px] text-stone-500">
+                            {{ hoverPoint.storeName }}
+                        </span>
+                        <span class="ml-auto text-[10px] text-stone-400">
+                            {{ hoverPoint.date }}
+                        </span>
+                    </div>
+                    <div
+                        class="mt-0.5 line-clamp-2 text-[11px] leading-snug font-medium text-stone-800"
+                    >
+                        {{ hoverPoint.name }}
+                    </div>
+                    <div class="mt-1 flex items-baseline gap-1.5">
+                        <span
+                            class="text-[14px] font-bold tracking-tight text-[#15803d]"
+                        >
+                            {{ formatPrice(hoverPoint.price) }}
+                        </span>
+                        <span
+                            v-if="
+                                hoverPoint.oldPrice &&
+                                hoverPoint.oldPrice > hoverPoint.price
+                            "
+                            class="text-[10px] text-stone-400 line-through"
+                        >
+                            {{ formatPrice(hoverPoint.oldPrice) }}
+                        </span>
+                        <span
+                            v-if="discountPct(hoverPoint)"
+                            class="rounded bg-emerald-50 px-1 text-[9px] font-semibold text-emerald-700"
+                        >
+                            −{{ discountPct(hoverPoint) }}%
+                        </span>
+                    </div>
+                    <div
+                        v-if="hoverPoint.sizeLabel || hoverPoint.condition"
+                        class="mt-0.5 flex flex-wrap gap-x-2 text-[10px] text-stone-500"
+                    >
+                        <span v-if="hoverPoint.sizeLabel">{{
+                            hoverPoint.sizeLabel
+                        }}</span>
+                        <span v-if="hoverPoint.condition">{{
+                            hoverPoint.condition
+                        }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </template>

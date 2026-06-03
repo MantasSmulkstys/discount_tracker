@@ -37,11 +37,13 @@ export type AdminOffer = {
     discount: number | null;
     condition: string | null;
     lastSeenAt: string | null;
+    rawName?: string | null;
 };
 
 export type AdminProduct = {
     id: number;
     canonicalName: string;
+    rawName: string;
     brand: string | null;
     categoryId: number | null;
     categoryName: string | null;
@@ -51,6 +53,7 @@ export type AdminProduct = {
     familyName: string | null;
     aiConfidence: number | null;
     needsReview: boolean;
+    isHidden: boolean;
     reportsCount: number;
     imageUrl: string | null;
     offers: AdminOffer[];
@@ -136,8 +139,8 @@ watch(
 
 const activeSubcategories = computed(() => {
     if (!form.category_id) {
-return [];
-}
+        return [];
+    }
 
     return (
         props.categories.find((c) => c.id === form.category_id)
@@ -175,8 +178,8 @@ function onFamilyChange(value: number | string | null) {
 
 function submit() {
     if (!props.product) {
-return;
-}
+        return;
+    }
 
     const transformed = {
         canonical_name: form.canonical_name,
@@ -205,8 +208,8 @@ return;
 
 function formatPrice(value: number | null): string {
     if (value === null) {
-return '–';
-}
+        return '–';
+    }
 
     return value.toFixed(2).replace('.', ',') + ' €';
 }
@@ -219,8 +222,8 @@ function parseNumberInput(value: string): number | null {
     const trimmed = value.trim().replace(',', '.');
 
     if (trimmed === '') {
-return null;
-}
+        return null;
+    }
 
     const parsed = parseFloat(trimmed);
 
@@ -229,8 +232,8 @@ return null;
 
 function formatRelativeDate(iso: string | null): string {
     if (!iso) {
-return '–';
-}
+        return '–';
+    }
 
     const date = new Date(iso);
     const now = new Date();
@@ -238,18 +241,18 @@ return '–';
     const diffHours = Math.round(diffMs / (1000 * 60 * 60));
 
     if (diffHours < 1) {
-return 'just now';
-}
+        return 'ką tik';
+    }
 
     if (diffHours < 24) {
-return `${diffHours}h ago`;
-}
+        return `prieš ${diffHours} val.`;
+    }
 
     const diffDays = Math.round(diffHours / 24);
 
     if (diffDays < 30) {
-return `${diffDays}d ago`;
-}
+        return `prieš ${diffDays} d.`;
+    }
 
     return date.toISOString().slice(0, 10);
 }
@@ -259,7 +262,10 @@ return `${diffDays}d ago`;
     <Dialog :open="!!product" @update:open="(v) => !v && close()">
         <DialogContent class="max-h-[90vh] max-w-3xl overflow-y-auto">
             <DialogHeader>
-                <DialogTitle>Edit Product</DialogTitle>
+                <DialogTitle>Redaguoti produktą</DialogTitle>
+                <p v-if="product" class="text-sm text-slate-500">
+                    {{ product.rawName }}
+                </p>
             </DialogHeader>
 
             <div
@@ -268,8 +274,9 @@ return `${diffDays}d ago`;
             >
                 <span class="inline-flex items-center gap-1">
                     <Store :size="12" class="text-slate-400" />
-                    {{ product.storeCount }} store{{
-                        product.storeCount === 1 ? '' : 's'
+                    {{ product.storeCount }}
+                    {{
+                        product.storeCount === 1 ? 'parduotuvė' : 'parduotuvės'
                     }}
                 </span>
                 <span
@@ -283,10 +290,7 @@ return `${diffDays}d ago`;
                 </span>
                 <span v-if="product.categoryName" class="text-slate-500">
                     {{ product.categoryName }}
-                    <span
-                        v-if="product.subcategoryName"
-                        class="text-slate-400"
-                    >
+                    <span v-if="product.subcategoryName" class="text-slate-400">
                         / {{ product.subcategoryName }}
                     </span>
                 </span>
@@ -295,7 +299,7 @@ return `${diffDays}d ago`;
             <form class="space-y-6" @submit.prevent="submit">
                 <div class="grid gap-4 sm:grid-cols-2">
                     <div class="space-y-1.5 sm:col-span-2">
-                        <Label for="canonical_name">Name</Label>
+                        <Label for="canonical_name">Pavadinimas</Label>
                         <Input
                             id="canonical_name"
                             v-model="form.canonical_name"
@@ -310,26 +314,26 @@ return `${diffDays}d ago`;
                     </div>
 
                     <div class="space-y-1.5">
-                        <Label for="brand">Brand</Label>
+                        <Label for="brand">Gamintojas</Label>
                         <Input
                             id="brand"
                             v-model="form.brand"
-                            placeholder="Optional"
+                            placeholder="Neprivaloma"
                             :disabled="form.processing"
                         />
                     </div>
 
                     <div class="space-y-1.5">
-                        <Label>Category</Label>
+                        <Label>Kategorija</Label>
                         <Select
                             :model-value="form.category_id?.toString() ?? ''"
                             @update:model-value="onCategoryChange"
                         >
                             <SelectTrigger>
-                                <SelectValue placeholder="No category" />
+                                <SelectValue placeholder="Be kategorijos" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">No category</SelectItem>
+                                <SelectItem value="">Be kategorijos</SelectItem>
                                 <SelectItem
                                     v-for="cat in categories"
                                     :key="cat.id"
@@ -345,18 +349,18 @@ return `${diffDays}d ago`;
                         v-if="activeSubcategories.length > 0"
                         class="space-y-1.5 sm:col-span-2"
                     >
-                        <Label>Subcategory</Label>
+                        <Label>Subkategorija</Label>
                         <Select
-                            :model-value="
-                                form.subcategory_id?.toString() ?? ''
-                            "
+                            :model-value="form.subcategory_id?.toString() ?? ''"
                             @update:model-value="onSubcategoryChange"
                         >
                             <SelectTrigger>
-                                <SelectValue placeholder="No subcategory" />
+                                <SelectValue placeholder="Be subkategorijos" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="">No subcategory</SelectItem>
+                                <SelectItem value=""
+                                    >Be subkategorijos</SelectItem
+                                >
                                 <SelectItem
                                     v-for="sub in activeSubcategories"
                                     :key="sub.id"
@@ -394,12 +398,12 @@ return `${diffDays}d ago`;
                         class="flex items-center gap-2 text-sm font-semibold text-slate-900"
                     >
                         <Tag :size="14" />
-                        Prices per store
+                        Kainos pagal parduotuvę
                     </div>
                     <p class="text-xs text-slate-500">
-                        Edit price, old price, discount, or condition. If
-                        discount is left empty, it is recalculated from price
-                        and old price.
+                        Redaguokite kainą, seną kainą, nuolaidą arba sąlygą. Jei
+                        nuolaida paliekama tuščia, ji perskaičiuojama pagal
+                        kainą ir seną kainą.
                     </p>
 
                     <div class="space-y-2">
@@ -441,7 +445,7 @@ return `${diffDays}d ago`;
                                         :for="`price-${offer.snapshotId}`"
                                         class="text-xs text-slate-600"
                                     >
-                                        Price (€)
+                                        Kaina (€)
                                     </Label>
                                     <Input
                                         :id="`price-${offer.snapshotId}`"
@@ -457,13 +461,11 @@ return `${diffDays}d ago`;
                                         :for="`old-${offer.snapshotId}`"
                                         class="text-xs text-slate-600"
                                     >
-                                        Old price (€)
+                                        Sena kaina (€)
                                     </Label>
                                     <Input
                                         :id="`old-${offer.snapshotId}`"
-                                        v-model="
-                                            form.offers[idx].oldPriceInput
-                                        "
+                                        v-model="form.offers[idx].oldPriceInput"
                                         type="text"
                                         inputmode="decimal"
                                         placeholder="–"
@@ -475,13 +477,11 @@ return `${diffDays}d ago`;
                                         :for="`disc-${offer.snapshotId}`"
                                         class="text-xs text-slate-600"
                                     >
-                                        Discount (%)
+                                        Nuolaida (%)
                                     </Label>
                                     <Input
                                         :id="`disc-${offer.snapshotId}`"
-                                        v-model="
-                                            form.offers[idx].discountInput
-                                        "
+                                        v-model="form.offers[idx].discountInput"
                                         type="text"
                                         inputmode="decimal"
                                         placeholder="auto"
@@ -493,7 +493,7 @@ return `${diffDays}d ago`;
                                         :for="`cond-${offer.snapshotId}`"
                                         class="text-xs text-slate-600"
                                     >
-                                        Condition
+                                        Sąlyga
                                     </Label>
                                     <Input
                                         :id="`cond-${offer.snapshotId}`"
@@ -501,7 +501,7 @@ return `${diffDays}d ago`;
                                             form.offers[idx].conditionInput
                                         "
                                         type="text"
-                                        placeholder="e.g. 1+1"
+                                        placeholder="pvz. 1+1"
                                         :disabled="form.processing"
                                     />
                                 </div>
@@ -512,7 +512,7 @@ return `${diffDays}d ago`;
 
                 <DialogFooter>
                     <Button type="button" variant="outline" @click="close">
-                        Cancel
+                        Atšaukti
                     </Button>
                     <Button
                         type="submit"
@@ -521,8 +521,8 @@ return `${diffDays}d ago`;
                     >
                         {{
                             form.processing
-                                ? 'Saving…'
-                                : (saveLabel ?? 'Save')
+                                ? 'Saugoma…'
+                                : (saveLabel ?? 'Išsaugoti')
                         }}
                     </Button>
                 </DialogFooter>

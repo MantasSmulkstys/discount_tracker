@@ -49,7 +49,7 @@ class StoreImportController extends Controller
                 'name' => mb_strtolower($displayName),
                 'website_url' => $payload['url'] ?? null,
                 'is_active' => true,
-                'logo_path' => "/store-logos/$slug.png",
+                'logo_path' => Store::resolveLogoPath($slug) ?? "/store-logos/$slug.png",
             ],
         );
 
